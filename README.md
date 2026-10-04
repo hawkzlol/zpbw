@@ -32,9 +32,6 @@ The important difference is what happens after that.
 
 Instead of freezing you in place or only allowing camera movement until the server catches up, Blinkwarp lets your local game continue normally. Movement, clicks, interactions, swings, slot changes and other relevant actions are kept in an ordered queue when they cannot safely be sent yet.
 
-<img width="1254" height="1254" alt="image" src="https://github.com/user-attachments/assets/e058340f-ff7c-4142-8409-5c3edff01c1a" />
-
-
 The flow is roughly:
 
 **Use Item -> Predict Destination -> Teleport Locally -> Send Real Use -> Hold Dependent Actions -> Receive Real Teleport -> Verify Prediction -> Replay Held Actions**
@@ -44,6 +41,8 @@ Once the server's genuine teleport arrives, Blinkwarp checks the authoritative l
 If they match, Minecraft's normal teleport handler is allowed to finish the teleport exactly as it normally would, including its native teleport acknowledgement and movement response. Blinkwarp then releases the actions it had been holding, in their original order.
 
 This means the server still remains authoritative. Blinkwarp does not invent a teleport ID, send a guessed acknowledgement, or pretend that the server has already confirmed something it has not.
+
+<img width="1254" height="1254" alt="image" src="https://github.com/user-attachments/assets/e058340f-ff7c-4142-8409-5c3edff01c1a" />
 
 # Why the packet holding is necessary.
 
