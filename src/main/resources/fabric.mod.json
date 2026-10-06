@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "zpbw",
+  "version": "${version}",
+  "name": "Zero Ping Blinkwarp",
+  "description": "ZPBW: local blinkwarp prediction with ordered packet holding, genuine server reconciliation and server-packet tick timeouts.",
+  "environment": "client",
+  "license": "MIT",
+  "entrypoints": {
+    "client": [
+      "com.hawkslol.zpbw.ZpbwClient"
+    ]
+  },
+  "mixins": [
+    "zpbw.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": "*",
+    "fabric-language-kotlin": "*"
+  },
+  "authors": [
+    "hawkslol"
+  ],
+  "contact": {
+    "sources": "https://github.com/hawkzlol/zpbw",
+    "issues": "https://github.com/hawkzlol/zpbw/issues"
+  }
+}

@@ -1,0 +1,37 @@
+plugins {
+    id "net.fabricmc.fabric-loom"
+    id "org.jetbrains.kotlin.jvm"
+}
+
+version = project.mod_version
+group = project.maven_group
+base { archivesName = "zpbw" }
+repositories { mavenCentral() }
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    implementation "net.fabricmc:fabric-language-kotlin:${project.fabric_kotlin_version}"
+    testImplementation "org.jetbrains.kotlin:kotlin-test"
+}
+
+loom { mods { zpbw { sourceSet sourceSets.main } } }
+kotlin { jvmToolchain(25) }
+java { withSourcesJar() }
+tasks.withType(JavaCompile).configureEach { options.release = 25 }
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
+}
+tasks.named("compileKotlin", org.jetbrains.kotlin.gradle.tasks.KotlinCompile) {
+    compilerOptions.moduleName.set("zpbw")
+}
+processResources {
+    inputs.property "version", project.version
+    filesMatching("fabric.mod.json") { expand version: project.version }
+}
+test {
+    useJUnitPlatform()
+    inputs.files(fileTree("src/main"))
+}
+jar { from("LICENSE") }

@@ -1,0 +1,16 @@
+/.gradle/
+/.gradle-user-home/
+/build/
+/out/
+/run/
+/logs/
+/config/
+/.idea/
+/.vscode/
+*.iml
+*.log
+.env
+.env.*
+local.properties
+*.jar
+!gradle/wrapper/gradle-wrapper.jar

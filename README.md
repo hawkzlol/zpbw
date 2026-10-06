@@ -8,11 +8,51 @@ Unlike older zero ping implementations which effectively left you limited to cam
 
 The goal is not to fake the server teleport or replace Minecraft's normal teleport handling. The real etherwarp use is still sent to the server, the server still performs its own raycast, and the genuine teleport response is still processed normally. Blinkwarp simply predicts the result ahead of time and keeps your client responsive while waiting for that confirmation.
 
-This mod has been put through very rigorous testing to make sure as many edge cases as possible are accounted for. It will also remain actively maintained until this game no longer interests me, or I consider the mod to be in a strong enough state to leave as-is.
+The mod has been tested in a local server lab across different latencies, chained warps, interactions and recovery cases. That does not cover every server or combination of mods. It will remain actively maintained until this game no longer interests me, or I consider the mod to be in a strong enough state to leave as-is.
 
 Use `/zpbw` to see the available commands.
 
-Use `/zpbw help` to see every command and its full description.
+## Installation
+
+This repository currently contains pre-release source. A public release has not been published yet.
+
+ZPBW is a client-side mod for **Minecraft Java 26.2**, using **Java 25**, **Fabric Loader**, **Fabric API** and **Fabric Language Kotlin**. Put the ZPBW JAR and its required Fabric dependencies in your instance's `mods` folder. Remove older ZPBW JARs before installing a replacement.
+
+## Commands
+
+Every setting below is saved between sessions.
+
+| Command | What it does |
+| --- | --- |
+| `/zpbw` | Shows the command list. |
+| `/zpbw on` / `/zpbw off` | Enables or disables prediction. |
+| `/zpbw nosneakdelay` or `/zpbw nsd` | Toggles NoSneakDelay. Add `on` or `off` to set it explicitly. |
+| `/zpbw timeout <ticks>` | Sets the timeout for new warps. Values are clamped to 2–20; the default is 20. |
+| `/zpbw logs` | Copies troubleshooting information from the current client session to your clipboard. |
+
+NoSneakDelay attempts to send sneak input earlier while preserving packet order. Timeout ticks count nonzero server Ping packets; their cadence can vary by server, so the value is not a fixed wall-clock duration.
+
+## Update notifications
+
+ZPBW checks this repository's latest stable GitHub release once per client session, in the background. If a newer version exists, a notification appears a few seconds after you join SkyBlock, like the first-install welcome. It does not download or install updates.
+
+No release, an inaccessible repository or a failed request simply means no update notification. Pre-releases are not offered by this checker.
+
+## Reporting a problem
+
+Run `/zpbw logs` after the problem occurs, **before closing Minecraft**, and include the copied text in a [bug report](https://github.com/hawkzlol/zpbw/issues/new?template=bug_report.yml). Explain what you clicked, what you expected and what happened instead. A short clip can help with movement or interaction problems.
+
+Diagnostics are kept in a bounded in-memory buffer for the current launch; ZPBW does not continuously write diagnostic files. The report includes relevant mod versions, settings and recent prediction events, including coordinates. It excludes chat, account details, server addresses and raw packet payloads. Review the copied text before posting it publicly.
+
+## Building from source
+
+With Java 25 installed:
+
+```sh
+./gradlew test build
+```
+
+On Windows, use `gradlew.bat test build`. The standalone mod is written to `build/libs/zpbw-1.0.0.jar`.
 
 # How it works, and why.
 
@@ -26,7 +66,7 @@ That means the visible result of an etherwarp normally has to wait for a full cl
 
 Zero Ping Blinkwarp removes that delay from your side of the interaction.
 
-When you attempt an etherwarp, Blinkwarp performs the same destination prediction locally. If a valid destination is found, your client is moved there immediately while the real `ServerboundUseItemPacket` is still sent to the server normally.
+When you attempt an etherwarp, Blinkwarp predicts the destination locally. If a valid destination is found, the real use is sent to the server first. Blinkwarp then relocates your client during the natural source tick, without waiting for the response. Prediction uses the world state available to your client; it is not a guarantee that the server's raycast will produce the same result.
 
 The important difference is what happens after that.
 
@@ -34,7 +74,7 @@ Instead of freezing you in place or only allowing camera movement until the serv
 
 The flow is roughly:
 
-**Use Item -> Predict Destination -> Teleport Locally -> Send Real Use -> Hold Dependent Actions -> Receive Real Teleport -> Verify Prediction -> Replay Held Actions**
+**Use Item -> Predict Destination -> Send Real Use -> Natural Source Tick and Local Teleport -> Hold Dependent Actions -> Receive Real Teleport -> Verify Prediction -> Replay Held Actions**
 
 Once the server's genuine teleport arrives, Blinkwarp checks the authoritative landing position against the position it predicted.
 
@@ -68,7 +108,7 @@ A new warp can be predicted from the previous predicted landing position, allowi
 
 Intermediate movement that the server could not have received yet is not blindly replayed between those warps. Blinkwarp keeps the packet stream ordered around the actual etherwarp uses and only releases movement and actions when their corresponding server state has caught up.
 
-There is a configurable limit to how many unconfirmed warps may exist at once so that prediction cannot run indefinitely ahead of the server.
+Up to **five unconfirmed warps** can overlap before the first confirmation arrives. This limit is fixed. After the first confirmation of an overlapping chain, new warp dispatch briefly waits for the remaining warps to settle. This bounded pause keeps continued chaining in order rather than letting prediction run indefinitely ahead of the server.
 
 # Prediction failures and recovery
 
@@ -81,8 +121,6 @@ If the server sends a different destination, the prediction expires, the connect
 Dependent queued actions which have not executed yet are cancelled rather than being fired from a position which is no longer valid.
 
 Already-sent etherwarp uses obviously cannot be taken back, but Blinkwarp will not manufacture another successful teleport on top of a failed prediction.
-
-In short:
 
 **the client predicts, but the server still gets the final say.**
 

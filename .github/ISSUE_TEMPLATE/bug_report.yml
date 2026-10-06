@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a problem with ZPBW.
+title: "[Bug] "
+body:
+  - type: input
+    id: version
+    attributes:
+      label: ZPBW version
+      description: Include the full build version from your installed JAR or copied diagnostics.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: minecraft
+    attributes:
+      label: Minecraft version
+      placeholder: "26.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: nsd
+    attributes:
+      label: Was NoSneakDelay enabled?
+      options:
+        - Not sure
+        - "Yes"
+        - "No"
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include your movement, clicks, slot changes and whether a warp was still waiting for confirmation.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Include any message shown in chat and whether you can reproduce the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: ZPBW diagnostics
+      description: Run /zpbw logs after the problem, before closing Minecraft, and paste the clipboard here. Review it before posting; diagnostics can include coordinates and installed mod versions.
+      render: text
+  - type: textarea
+    id: extra
+    attributes:
+      label: Clip or additional context
+      description: Optional. Attach a short clip or describe other mods involved in the interaction.

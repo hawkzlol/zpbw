@@ -1,0 +1,12 @@
+pluginManagement {
+    repositories {
+        maven { url = "https://maven.fabricmc.net/" }
+        gradlePluginPortal()
+        mavenCentral()
+    }
+    plugins {
+        id "net.fabricmc.fabric-loom" version "1.17.11"
+        id "org.jetbrains.kotlin.jvm" version "2.4.10"
+    }
+}
+rootProject.name = "zpbw"
