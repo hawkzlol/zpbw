@@ -14,9 +14,9 @@ Use `/zpbw` to see the available commands.
 
 ## Installation
 
-This repository currently contains pre-release source. A public release has not been published yet.
+Download **[ZPBW 1.0.0](https://github.com/hawkzlol/zpbw/releases/tag/v1.0.0)** from GitHub Releases.
 
-ZPBW is a client-side mod for **Minecraft Java 26.2**, using **Java 25**, **Fabric Loader**, **Fabric API** and **Fabric Language Kotlin**. Put the ZPBW JAR and its required Fabric dependencies in your instance's `mods` folder. Remove older ZPBW JARs before installing a replacement.
+ZPBW is a client-side mod for **Minecraft Java 26.2**, using **Java 25**, **Fabric Loader 0.19.3 or newer**, **Fabric API** and **Fabric Language Kotlin**. Put the ZPBW JAR and its required Fabric dependencies in your instance's `mods` folder. Remove older ZPBW JARs before installing a replacement.
 
 ## Commands
 

@@ -124,7 +124,7 @@ object ZpbwRuntime {
             firstInstall = false // An unreadable existing config is not a fresh installation.
             configErrors++; event("CONFIG_READ_FAILED type=${failure.javaClass.simpleName}")
         }
-        event("INITIALIZED version=1.0.0 enabled=${mode == Mode.REPLAY} orderedActions=true chainmax=${chain.maximum} observe=automatic timeoutTicks=$timeoutTicks")
+        event("INITIALIZED version=${ZpbwClient.version} enabled=${mode == Mode.REPLAY} orderedActions=true chainmax=${chain.maximum} observe=automatic timeoutTicks=$timeoutTicks")
         updateChecker.start()
     }
     fun select(requested: Mode): String {
@@ -133,12 +133,12 @@ object ZpbwRuntime {
             cancelWaitingInputs("disabled")
             mode = requested; event("MODE OFF pending=${chain.count}")
             if (!saveSettings()) return "Disabled, but config could not be saved."
-            return "Disabled." // Existing pending predictions still settle or fall back without kicking.
+            return "Disabled Zero Ping Blinkwarp." // Existing pending predictions still settle or fall back without kicking.
         }
         if (requested == Mode.OBSERVE && chain.count > 0) return "Use /zpbw off first; let the current chain settle."
         observations.clear(); mode = requested; event("MODE $requested")
         if (!saveSettings()) return "Setting changed, but config could not be saved."
-        return if (requested == Mode.REPLAY) "Enabled."
+        return if (requested == Mode.REPLAY) "Enabled Zero Ping Blinkwarp."
             else "Observation active. Vanilla gameplay remains unchanged."
     }
     fun configureTimeout(ticks: Int): String {

@@ -48,14 +48,13 @@ object ZpbwMessages {
         .append(footer(width))
 
     fun welcome(version: String, width: (String) -> Int = { it.length }): Component = legacy(HEADER +
-        "\n&aYou just installed ZPBW $version!" +
-        "\n&aTo get started, run /zpbw to" +
-        "\n&asee all available commands." +
-        "\n&aAs of build version 1.0.0, there have been" +
-        "\n&ano recorded ZPBW bans. Please understand" +
+        "\n&a&lYou just installed ZPBW $version!" +
+        "\n&aTo get started, run &f/zpbw&a to see all of the commands." +
+        "\n&aAs of build version 1.0.0 there has been" +
+        "\n&ano recorded ZPBW bans, but please understand" +
         "\n&athat this can change at any time. If you" +
         "\n&aencounter any bugs, report them at\n")
-        .append(Component.literal(REPOSITORY).withStyle(ChatFormatting.BLUE, ChatFormatting.UNDERLINE)
+        .append(Component.literal(REPOSITORY).withStyle(ChatFormatting.AQUA, ChatFormatting.UNDERLINE)
             .withStyle { it.withClickEvent(ClickEvent.OpenUrl(URI.create(REPOSITORY))) })
         .append("\n").append(footer(width))
 

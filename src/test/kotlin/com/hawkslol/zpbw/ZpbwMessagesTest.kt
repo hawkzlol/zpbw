@@ -10,12 +10,12 @@ import kotlin.test.*
 class ZpbwMessagesTest {
     private fun flattened(c: Component): List<Component> = listOf(c) + c.siblings.flatMap(::flattened)
     @Test fun prefixAndTogglesUseBlueGrayWhite() {
-        val message=ZpbwMessages.selection("Enabled.")
-        assertEquals("[ZPBW] Enabled.",message.string)
+        val message=ZpbwMessages.selection("Enabled Zero Ping Blinkwarp.")
+        assertEquals("[ZPBW] Enabled Zero Ping Blinkwarp.",message.string)
         assertEquals(TextColor.fromLegacyFormat(ChatFormatting.GRAY),message.siblings[0].style.color)
         assertEquals(TextColor.fromLegacyFormat(ChatFormatting.BLUE),message.siblings[1].style.color)
         assertEquals(TextColor.fromLegacyFormat(ChatFormatting.WHITE),message.siblings.last().style.color)
-        assertEquals(TextColor.fromLegacyFormat(ChatFormatting.WHITE),ZpbwMessages.selection("Disabled.").siblings.last().style.color)
+        assertEquals(TextColor.fromLegacyFormat(ChatFormatting.WHITE),ZpbwMessages.selection("Disabled Zero Ping Blinkwarp.").siblings.last().style.color)
         assertFalse(message.string.contains('&'))
     }
     @Test fun helpHasOnlyPublicCommandsAndMatchingBorder() {
@@ -54,11 +54,22 @@ class ZpbwMessagesTest {
     @Test fun welcomeHasVersionAndClickableUnderlinedProjectLink() {
         val c=ZpbwMessages.welcome("1.0.0")
         assertContains(c.string,"You just installed ZPBW 1.0.0!")
+        assertContains(c.string,"To get started, run /zpbw to see all of the commands.")
+        val pieces=flattened(c)
+        val installed=pieces.first { it.string=="You just installed ZPBW 1.0.0!\n" }
+        assertTrue(installed.style.isBold)
+        assertEquals(TextColor.fromLegacyFormat(ChatFormatting.GREEN),installed.style.color)
+        val command=pieces.first { it.string=="/zpbw" }
+        assertEquals(TextColor.fromLegacyFormat(ChatFormatting.WHITE),command.style.color)
+        assertFalse(command.style.isBold)
+        val continuation=pieces.first { it.string.startsWith(" to see all of the commands.") }
+        assertEquals(TextColor.fromLegacyFormat(ChatFormatting.GREEN),continuation.style.color)
+        assertFalse(continuation.style.isBold)
         assertEquals(c.string.lines().first().length,c.string.lines().last().length)
         val link=flattened(c).first { it.style.clickEvent is ClickEvent.OpenUrl }
         assertEquals(ZpbwMessages.REPOSITORY,link.string)
         assertTrue(link.style.isUnderlined)
-        assertEquals(TextColor.fromLegacyFormat(ChatFormatting.BLUE),link.style.color)
+        assertEquals(TextColor.fromLegacyFormat(ChatFormatting.AQUA),link.style.color)
         assertFalse(c.string.contains('&')); assertFalse(c.string.contains("[ZPBW]"))
     }
 }
