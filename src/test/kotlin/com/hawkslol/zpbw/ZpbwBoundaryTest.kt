@@ -9,6 +9,24 @@ import kotlin.test.*
 class ZpbwBoundaryTest {
     private val root = Path(System.getProperty("user.dir"))
     private val runtime get() = root.resolve("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt").readText()
+    @Test fun skyblockDetectionUsesOnlyNativeServerSignals() {
+        val detector = root.resolve("src/main/kotlin/com/hawkslol/zpbw/SkyblockDetector.kt").readText()
+        listOf("FabricLoader", "Class.forName", "java.lang.reflect", "blackwell", "getInSkyblock").forEach {
+            assertFalse(detector.contains(it, ignoreCase = true), "Detection must not delegate to another mod: $it")
+        }
+        assertContains(detector, "client.level ?: return false")
+        assertContains(detector, "level.scoreboard")
+        assertContains(detector, "client.connection?.listedOnlinePlayers")
+        assertContains(detector, "PlayerTeam.formatNameForTeam(")
+        assertContains(detector, "entry.ownerName()")
+        assertContains(detector, "overlay.getNameForDisplay(it)")
+        assertContains(detector, "`zpbw\$getHeader`()")
+        assertContains(detector, "`zpbw\$getFooter`()")
+        assertContains(root.resolve("src/main/resources/zpbw.mixins.json").readText(), "ZpbwTabOverlayAccessor")
+        assertContains(detector, "SkyblockSignals.matches(")
+        val meta = JsonParser.parseString(root.resolve("src/main/resources/fabric.mod.json").readText()).asJsonObject
+        assertEquals(setOf("fabricloader", "minecraft", "java", "fabric-api", "fabric-language-kotlin"), meta.getAsJsonObject("depends").keySet())
+    }
     @Test fun separateDisabledCandidateObservesWithoutCalibrationRitual() {
         val meta = root.resolve("src/main/resources/fabric.mod.json").readText()
         assertContains(meta, "\"id\": \"zpbw\"")
@@ -96,9 +114,30 @@ class ZpbwBoundaryTest {
         val recovery = runtime.substringAfter("private fun recover(").substringBefore("private fun prepareReplayLook(")
         assertContains(recovery, "`zpbw\$setPositionReminder`(transmittedPosition.reminder)")
         assertFalse(recovery.contains("`zpbw\$setPositionReminder`(20)"))
-        assertTrue(recovery.indexOf("forwardEnvelope(") < recovery.indexOf("transmittedPosition.position?.let"))
+        assertContains(recovery, "forwardRecoveryEnvelope(p.stream, held)")
+        assertTrue(recovery.indexOf("forwardRecoveryEnvelope(") < recovery.indexOf("transmittedPosition.position?.let"))
+        assertContains(recovery, "`zpbw\$setLastSentInput`(transmittedControls.input)")
+        assertContains(recovery, "`zpbw\$setWasSprinting`(transmittedControls.sprinting)")
+        assertFalse(recovery.contains("NoSneakDelay.reset()"))
         assertContains(runtime, "prepareReplayLook(p.player)")
         assertFalse(runtime.contains("notice(\"Prediction"))
+    }
+    @Test fun recoveryRepicksNativeTargetsBeforeControlsResumeAndAfterLateTeleport() {
+        val recovery = runtime.substringAfter("private fun recover(").substringBefore("private fun refreshRecoveryPick(")
+        val repick = recovery.indexOf("refreshRecoveryPick()")
+        assertTrue(repick > recovery.indexOf("p.sourcePose.restore(p.player)"))
+        assertTrue(repick > recovery.indexOf("forwardRecoveryEnvelope(p.stream, held)"))
+        val lateTeleport = runtime.substringAfter("} else if (h.recovery) {").substringBefore("event(\"RECOVERY_AUTHORITATIVE")
+        assertContains(lateTeleport, "refreshRecoveryPick()")
+        assertTrue(lateTeleport.indexOf("refreshRecoveryPick()") > lateTeleport.indexOf("h.preserveAim?.let"))
+        val pick = runtime.substringAfter("private fun refreshRecoveryPick() {").substringBefore("private fun prepareReplayLook(")
+        assertContains(pick, "`zpbw\$setHitResult`(null)")
+        assertContains(pick, "mc.crosshairPickEntity = null")
+        assertContains(pick, "`zpbw\$pick`(1.0f)")
+        assertFalse(pick.contains(".send("))
+        assertFalse(pick.contains("startAttack"))
+        assertFalse(pick.contains("startUseItem"))
+        assertFalse(pick.contains("mc.execute"), "The target must be refreshed before this frame resumes controls")
     }
     @Test fun settingsLoadAtStartupAndSessionsClearOnlyInFlightState() {
         assertContains(runtime, "gameDir.resolve(\"config/zpbw\")")

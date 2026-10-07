@@ -16,4 +16,6 @@ public interface ZpbwPlayerAccessor {
     @Accessor("lastOnGround") void zpbw$setLastOnGround(boolean value);
     @Accessor("lastHorizontalCollision") void zpbw$setLastHorizontalCollision(boolean value);
     @Accessor("positionReminder") void zpbw$setPositionReminder(int value);
+    @Accessor("lastSentInput") void zpbw$setLastSentInput(net.minecraft.world.entity.player.Input value);
+    @Accessor("wasSprinting") void zpbw$setWasSprinting(boolean value);
 }

@@ -14,7 +14,7 @@ Use `/zpbw` to see the available commands.
 
 ## Installation
 
-Download **[ZPBW 1.0.0](https://github.com/hawkzlol/zpbw/releases/tag/v1.0.0)** from GitHub Releases.
+Download **[ZPBW 1.0.1](https://github.com/hawkzlol/zpbw/releases/tag/v1.0.1)** from GitHub Releases.
 
 ZPBW is a client-side mod for **Minecraft Java 26.2**, using **Java 25**, **Fabric Loader 0.19.3 or newer**, **Fabric API** and **Fabric Language Kotlin**. Put the ZPBW JAR and its required Fabric dependencies in your instance's `mods` folder. Remove older ZPBW JARs before installing a replacement.
 
@@ -38,6 +38,8 @@ ZPBW checks this repository's latest stable GitHub release once per client sessi
 
 No release, an inaccessible repository or a failed request simply means no update notification. Pre-releases are not offered by this checker.
 
+SkyBlock detection reads Minecraft's sidebar and tab list directly. It does not require another SkyBlock mod or inherit another mod's developer overrides.
+
 ## Reporting a problem
 
 Run `/zpbw logs` after the problem occurs, **before closing Minecraft**, and include the copied text in a [bug report](https://github.com/hawkzlol/zpbw/issues/new?template=bug_report.yml). Explain what you clicked, what you expected and what happened instead. A short clip can help with movement or interaction problems.
@@ -52,7 +54,7 @@ With Java 25 installed:
 ./gradlew test build
 ```
 
-On Windows, use `gradlew.bat test build`. The standalone mod is written to `build/libs/zpbw-1.0.0.jar`.
+On Windows, use `gradlew.bat test build`. The standalone mod is written to `build/libs/zpbw-1.0.1.jar`.
 
 # How it works, and why.
 

@@ -42,14 +42,14 @@ public abstract class ZpbwUseMixin {
     @Inject(method = "startDestroyBlock", at = @At("HEAD"), cancellable = true)
     private void zpbwCandidate$startDig(BlockPos pos, Direction face, CallbackInfoReturnable<Boolean> ci) {
         BlockPos fixed = pos.immutable();
-        if (ZpbwRuntime.deferAction("start_dig", () -> Minecraft.getInstance().gameMode.startDestroyBlock(fixed, face))) {
+        if (ZpbwRuntime.deferMining(fixed, false, () -> Minecraft.getInstance().gameMode.startDestroyBlock(fixed, face))) {
             ci.setReturnValue(true); return;
         }
     }
     @Inject(method = "continueDestroyBlock", at = @At("HEAD"), cancellable = true)
     private void zpbwCandidate$continueDig(BlockPos pos, Direction face, CallbackInfoReturnable<Boolean> ci) {
         BlockPos fixed = pos.immutable();
-        if (ZpbwRuntime.deferAction("continue_dig", () -> Minecraft.getInstance().gameMode.continueDestroyBlock(fixed, face))) {
+        if (ZpbwRuntime.deferMining(fixed, true, () -> Minecraft.getInstance().gameMode.continueDestroyBlock(fixed, face))) {
             ci.setReturnValue(true); return;
         }
     }

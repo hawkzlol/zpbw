@@ -7,6 +7,7 @@ import org.spongepowered.asm.mixin.gen.Invoker;
 @Mixin(Minecraft.class)
 public interface ZpbwMinecraftAccessor {
     @Invoker("startAttack") boolean zpbw$startAttack();
+    @Invoker("continueAttack") void zpbw$continueAttack(boolean attackHeld);
     @Invoker("startUseItem") void zpbw$startUseItem();
     @Invoker("pick") void zpbw$pick(float partialTick);
     @Accessor("hitResult") HitResult zpbw$getHitResult();

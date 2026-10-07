@@ -26,6 +26,7 @@ import net.minecraft.world.phys.Vec3
 
 /** User-owned prediction only. No automatic use, guessed response, proxy, or heartbeat ownership. */
 object ZpbwRuntime {
+    private val miningReplay = MiningReplayGate()
     enum class Mode { OFF, OBSERVE, REPLAY }
     private val mc get() = Minecraft.getInstance()
     private sealed interface Held {
@@ -69,6 +70,8 @@ object ZpbwRuntime {
     private var sentCollision: Pair<Boolean, Boolean>? = null
     private val movementInputs = MovementInputHistory()
     private val transmittedPosition = TransmittedPositionHistory()
+    private val transmittedControls = TransmittedControlHistory()
+    private val carriedSlots = CarriedSlotHistory<Connection>()
     private data class WaitingInput(val name: String, val warp: Boolean, val stream: Connection,
         val player: LocalPlayer, val level: ClientLevel, val slot: Int, val item: ItemStack,
         val offhand: ItemStack, val yaw: Float, val pitch: Float, val position: Vec3,
@@ -219,6 +222,12 @@ object ZpbwRuntime {
         return if (saveSettings()) message else "$message Config could not be saved."
     }
     fun canSendSneakEarly() = !externalPredictionActive() && chain.count == 0 && handling == null && !bypass && System.nanoTime() >= recoveringUntil
+
+    /** A first use precedes this tick's input sample. A newly pressed key alone does not
+     * arm the server's Etherwarp. NSD's earlier native input is already in this history.
+     * Dependent uses retain their existing queued-input semantics. */
+    private fun predictionSneak(): Boolean? = if (chain.count == 0 && dispatchingInput == null)
+        transmittedControls.input.shift() else NoSneakDelay.sneakForPrediction()
     fun sneakEvent(detail: String) = event("NSD_$detail pending=${chain.count}")
 
     /** Route armed shovel actions and valid Etherwarp block clicks into the native item ability. */
@@ -230,12 +239,12 @@ object ZpbwRuntime {
         val level = mc.level ?: return null
         val game = mc.gameMode ?: return null
         if (game.isSpectator || player.cooldowns.isOnCooldown(player.mainHandItem)) return null
-        val sneaking = NoSneakDelay.sneakForPrediction() ?: (player.isShiftKeyDown || mc.options.keyShift.isDown)
+        val sneaking = predictionSneak() ?: (player.isShiftKeyDown || mc.options.keyShift.isDown)
         val shovelRoute = ShovelBlockUsePolicy.routes(player.mainHandItem, sneaking, level.getBlockState(hit.blockPos),
                 hit.direction, level.getBlockState(hit.blockPos.above()).isAir)
         val warpRoute = (chain.count > 0 || sneaking) && EtherwarpPredictor.qualifiesForBlockUse(player.mainHandItem, sneaking) &&
             EtherwarpPredictor.predictCurrentEtherwarpForRotation(player.yRot, player.xRot, chain.tail?.value?.target,
-                sneakingOverride = NoSneakDelay.sneakForPrediction())?.succeeded == true
+                sneakingOverride = predictionSneak())?.succeeded == true
         if (!shovelRoute && !warpRoute) return null
         if (warpRoute) event("ETHERWARP_BLOCK_USE_ROUTED pending=${chain.count}")
         event("SHOVEL_BLOCK_USE_ROUTED hand=$hand block=${hit.blockPos} face=${hit.direction}")
@@ -266,8 +275,9 @@ object ZpbwRuntime {
         // Server has not received held intermediate displacement. Dependent rays start at the
         // preceding predicted landing, never at an unsent advanced client position.
         val anchor = if (mode == Mode.REPLAY) chain.tail?.value?.target else null
+        val predictionSneak = predictionSneak()
         val predicted = EtherwarpPredictor.predictCurrentEtherwarpForRotation(local.yRot, local.xRot, anchor,
-            sneakingOverride = NoSneakDelay.sneakForPrediction())
+            sneakingOverride = predictionSneak)
         if (predicted != null) {
             val attempt = ++rayAttempt
             predicted.diagnostics.forEach { event("PREDICTION_RAY attempt=$attempt nextGeneration=${generation + 1} pending=${chain.count} $it") }
@@ -284,7 +294,7 @@ object ZpbwRuntime {
             return true
         }
         if (unshifted == null) {
-            event("USE_NO_PREDICTION pending=${chain.count}")
+            event("USE_NO_PREDICTION pending=${chain.count} predictionSneak=$predictionSneak sentSneak=${transmittedControls.input.shift()} sampledSneak=${local.isShiftKeyDown} keySneak=${mc.options.keyShift.isDown}")
             if (FastActionPolicy.keepPendingOnVanillaUse(chain.count)) {
                 queuedUse = deferAction("use") { mc.gameMode!!.useItem(local, hand) }
                 return queuedUse
@@ -351,6 +361,7 @@ object ZpbwRuntime {
             packet is ServerboundPlayerInputPacket || packet is ServerboundPlayerCommandPacket || packet is ServerboundSwingPacket) {
             try {
                 chain.retain(Held.Wire(packet), action = fastAction)
+                if (packet is ServerboundSetCarriedItemPacket) carriedSlots.captured()
                 if (fastAction) event("FAST_ACTION_QUEUED kind=${kind(packet)} pending=${chain.count}")
                 event("RETAIN generation=${tail.generation} kind=${kind(packet)} size=${chain.size}")
                 return true
@@ -367,6 +378,8 @@ object ZpbwRuntime {
     @JvmStatic fun afterSend(connection: Connection, packet: Packet<*>) {
         if (!mc.isSameThread || connection !== connected) return
         // Include bypass replay and genuine native responses, but never retained packets.
+        transmittedControls.sent(packet)
+        if (packet is ServerboundSetCarriedItemPacket) carriedSlots.sent(packet.slot)
         if (packet is ServerboundMovePlayerPacket && packet.hasRotation())
             sentRotation = packet.getYRot(0f) to packet.getXRot(0f)
         // A teleport response is not a simulation tick and does not replace the previous
@@ -384,6 +397,7 @@ object ZpbwRuntime {
         if (packet is ServerboundUseItemPacket) {
             if (dispatchingInput != null) queuedTickAim = packet.yRot to packet.xRot
             event("USE_REQUESTED sequence=${packet.sequence} yaw=${packet.yRot} pitch=${packet.xRot} pending=${chain.count}")
+            event("USE_CONTEXT sequence=${packet.sequence} sentPosition=${transmittedPosition.position} sentLook=$sentRotation sentSneak=${transmittedControls.input.shift()} local=${mc.player?.position()} velocity=${mc.player?.deltaMovement}")
             val tail = chain.tail
             if (tail != null && !tail.cut && tail.value.use == null) tail.value.use = packet
             else observations.lastOrNull { it.stream === connection && it.use == null }?.use = packet
@@ -408,7 +422,7 @@ object ZpbwRuntime {
             p.source = p.sourcePose.move
         }
         chain.cut(tail.generation)
-        event("SOURCE_TICK_END_REQUESTED generation=${p.generation}")
+        event("SOURCE_TICK_END_REQUESTED generation=${p.generation} source=${xyz(p.sourcePose.move.position())} yaw=${p.sourcePose.move.yRot()} pitch=${p.sourcePose.move.xRot()} target=${xyz(p.target)}")
         p.player.setPos(p.target); p.player.deltaMovement = Vec3.ZERO; p.player.setOldPosAndRot()
         prepareReplayLook(p.player)
         if (p.dependent) {
@@ -586,6 +600,7 @@ object ZpbwRuntime {
                 h.preserveAim?.let { (yaw, pitch) -> player.yRot = yaw; player.xRot = pitch }
                 rebaseSender(player, forceLook = h.preserveAim != null)
                 (player as ZpbwPlayerAccessor).`zpbw$setPositionReminder`(20)
+                refreshRecoveryPick()
             }
             event("RECOVERY_AUTHORITATIVE id=${packet.id()} pose=${mc.player?.position()?.let(::xyz)}")
         }
@@ -679,7 +694,7 @@ object ZpbwRuntime {
         if (chain.count != 0 || handling != null || bypass || dispatchingInput != null || inputDispatchedThisTick) return
         val next = waitingInputs.firstOrNull() ?: return
         val player = next.player
-        val mobile = next.name in setOf("warp_use", "warp_click", "use", "use_click", "offhand_use", "entity_attack_click", "entity_use_click")
+        val mobile = MiningInputPolicy.isMining(next.name) || next.name in setOf("warp_use", "warp_click", "use", "use_click", "offhand_use", "entity_attack_click", "entity_use_click")
         if (mc.player !== player || mc.level !== next.level || mc.connection?.connection !== next.stream ||
             !next.stream.isConnected || !player.isAlive || player.isPassenger || mc.gui.screen() != null ||
             player.isHandsBusy || mc.gameMode?.isSpectator != false ||
@@ -842,7 +857,86 @@ object ZpbwRuntime {
         }
     }
 
-    /** Defer native invocation, not an already-numbered interaction packet or mutated item stack. */
+    /** Retain the complete native block click, including its animation and other mods' click
+     * observers. Deferring only startDestroyBlock would leave its original swing in old history. */
+    @JvmStatic fun deferBlockAttack(continuing: Boolean, attackHeld: Boolean): Boolean {
+        if (!mc.isSameThread || externalPredictionActive() || bypass || dispatchingInput != null || !attackHeld) return false
+        val world = mc.level ?: return false
+        if (chain.count == 0 && waitingInputs.isEmpty())
+            return continuing && miningReplay.continuedAt(world, world.gameTime)
+        val player = mc.player ?: return false
+        val game = mc.gameMode ?: return false
+        val input = mc as ZpbwMinecraftAccessor
+        val hit = input.`zpbw$getHitResult`() as? net.minecraft.world.phys.BlockHitResult ?: return false
+        if (hit.type != net.minecraft.world.phys.HitResult.Type.BLOCK || player.isHandsBusy ||
+            game.isSpectator || mc.gui.screen() != null || input.`zpbw$getMissTime`() > 0) return false
+        if (MiningInputPolicy.coalesce(continuing, waitingInputs.asSequence().map { it.name })) return true
+        val target = hit.blockPos.immutable()
+        val expected = world.getBlockState(target)
+        if (expected.isAir) return false
+        return queueInput(if (continuing) "block_continue_click" else "block_attack_click", false, Runnable {
+            val valid = mc.level === world && mc.player === player && mc.gameMode === game &&
+                player.isAlive && mc.gui.screen() == null && world.hasChunkAt(target) &&
+                world.getBlockState(target) == expected && player.isWithinBlockInteractionRange(target, 0.0)
+            val liveHit = input.`zpbw$getHitResult`() as? net.minecraft.world.phys.BlockHitResult
+            val stillMining = !continuing || MiningInputPolicy.canContinue(mc.options.keyAttack.isDown,
+                liveHit?.type == net.minecraft.world.phys.HitResult.Type.BLOCK && liveHit.blockPos == target,
+                game.isDestroying && (game as ZpbwGameModeAccessor).`zpbw$sameDestroyTarget`(target))
+            if (!valid || !stillMining) {
+                event("MINING_CLICK_SKIPPED continuing=$continuing validTarget=$valid liveContinuation=$stillMining")
+                cancelInputDispatch("queued_mining_context_changed")
+                return@Runnable
+            }
+            val advancedHit = input.`zpbw$getHitResult`()
+            val advancedEntity = mc.crosshairPickEntity
+            try {
+                aimAtClickedPoint(player, hit.location.lerp(Vec3.atCenterOf(target), 1e-6))
+                input.`zpbw$pick`(1.0f)
+                val fresh = input.`zpbw$getHitResult`() as? net.minecraft.world.phys.BlockHitResult
+                if (fresh?.type != net.minecraft.world.phys.HitResult.Type.BLOCK || fresh.blockPos != target) {
+                    event("MINING_CLICK_SKIPPED continuing=$continuing reason=queued_ray_changed")
+                    cancelInputDispatch("queued_mining_ray_changed")
+                    return@Runnable
+                }
+                miningReplay.replay(world, world.gameTime, continuing, true, stillMining) {
+                    if (continuing) input.`zpbw$continueAttack`(true) else input.`zpbw$startAttack`()
+                }
+            } finally {
+                input.`zpbw$setHitResult`(advancedHit)
+                mc.crosshairPickEntity = advancedEntity
+            }
+        })
+    }
+
+    /** Run mining after the old movement journal drains, at a normal input boundary. Breaking
+     * support inside replay would invalidate the physics of every later held movement. */
+    @JvmStatic fun deferMining(pos: net.minecraft.core.BlockPos, continuing: Boolean, action: Runnable): Boolean {
+        if (!mc.isSameThread || externalPredictionActive() || bypass || dispatchingInput != null) return false
+        // After a queued start, ordinary held mining may continue in the same native tick.
+        // inputDispatchedThisTick alone must not create a perpetual continuation backlog.
+        val world = mc.level ?: return false
+        if (chain.count == 0 && waitingInputs.isEmpty())
+            return continuing && miningReplay.continuedAt(world, world.gameTime)
+        val player = mc.player ?: return false
+        val game = mc.gameMode ?: return false
+        if (MiningInputPolicy.coalesce(continuing, waitingInputs.asSequence().map { it.name })) return true
+        val target = pos.immutable()
+        val expected = world.getBlockState(target)
+        return queueInput(if (continuing) "continue_dig" else "start_dig", false, Runnable {
+            val valid = mc.level === world && mc.player === player && mc.gameMode === game &&
+                player.isAlive && mc.gui.screen() == null && world.hasChunkAt(target) &&
+                !expected.isAir && world.getBlockState(target) == expected &&
+                player.isWithinBlockInteractionRange(target, 0.0)
+            val hit = (mc as ZpbwMinecraftAccessor).`zpbw$getHitResult`() as? net.minecraft.world.phys.BlockHitResult
+            val stillMining = !continuing || MiningInputPolicy.canContinue(mc.options.keyAttack.isDown,
+                hit?.blockPos == target, game.isDestroying && (game as ZpbwGameModeAccessor).`zpbw$sameDestroyTarget`(target))
+            if (!miningReplay.replay(world, world.gameTime, continuing, valid, stillMining) { action.run() }) {
+                event("MINING_INPUT_SKIPPED continuing=$continuing validTarget=$valid liveContinuation=$stillMining")
+                cancelInputDispatch("queued_mining_context_changed")
+            }
+        })
+    }
+
     @JvmStatic fun deferAction(name: String, action: Runnable): Boolean {
         if (externalPredictionActive()) return false
         if (bypass || dispatchingInput != null || !mc.isSameThread) return false
@@ -877,6 +971,8 @@ object ZpbwRuntime {
     }
     fun joined() { firstInstallNotice.reset(); updateNotification.reset(); attach(); event("JOIN observe=automatic mode=$mode realTeleports=$realTeleports") }
     fun reset() {
+        carriedSlots.bind(null)
+        miningReplay.reset()
         firstInstallNotice.reset()
         updateNotification.reset()
         cancelWaitingInputs("disconnect"); inputDispatchedThisTick = false
@@ -888,6 +984,7 @@ object ZpbwRuntime {
         sentCollision = null
         movementInputs.reset()
         transmittedPosition.reset()
+        transmittedControls.reset()
         event("DISCONNECT cleared=true enabled=${mode == Mode.REPLAY}")
     }
     fun status() = "${if (mode == Mode.REPLAY) "on" else "off"}; orderedActions=true, nsd=${NoSneakDelay.enabled}, pending=${chain.count}/${chain.maximum}, timeoutTicks=$timeoutTicks, retained=${chain.size}, genuine=$realTeleports, observedMatches=$observed, settled=$replayed, fallbacks=$failed, motionCorrections=$motionCorrections, physicsRebases=$physicsRebases, logDrops=${log.dropped.get()}, logErrors=${log.errors.get()}, configErrors=$configErrors; remote acceptance not measured"
@@ -958,8 +1055,10 @@ object ZpbwRuntime {
             "Contains local positions, timings and mod versions. No chat, server address, account details or raw packet payloads are collected.\n\n" + log.snapshot()
     }
     private fun attach(stream: Connection? = mc.connection?.connection) {
+        carriedSlots.bind(stream)
         if (stream !== connected || mc.level !== world || mc.player !== sessionPlayer) {
             externalOwnership.bind(null, null, null)
+            miningReplay.reset()
             val count = chain.count
             epoch++; warpTimeouts.bind(stream); chain.clear(); observations.clear(); handling = null
             teleportIds.bind(stream, mc.level) // Clears on world-only changes too, with the same TCP connection.
@@ -969,10 +1068,19 @@ object ZpbwRuntime {
             sentCollision = null
             movementInputs.reset()
             transmittedPosition.reset()
+            transmittedControls.reset()
             event("SESSION epoch=$epoch discarded=$count connected=${stream != null}")
         }
     }
     private fun identity(p: Pending) = mc.connection?.connection === p.stream && mc.player === p.player && mc.level === p.level && p.stream.isConnected
+    /** Before vanilla replaces its player/world but preserves the game-mode sender cache. */
+    @JvmStatic fun beforeWorldReplacement(stream: Connection) {
+        if (!mc.isSameThread || stream !== connected) return
+        carriedSlots.abandon(stream)?.let { slot ->
+            (mc.gameMode as? ZpbwGameModeAccessor)?.`zpbw$setCarriedIndex`(slot)
+            event("WORLD_SLOT_CACHE_REBASED slot=$slot")
+        }
+    }
     private fun saveSettings(): Boolean = try {
         settingsStore.save(ZpbwSettings(mode == Mode.REPLAY, NoSneakDelay.enabled, timeoutTicks, firstInstall)); true
     } catch (failure: Exception) {
@@ -988,7 +1096,6 @@ object ZpbwRuntime {
         warpTimeouts.clear()
         val p = chain.head?.value ?: return
         val count = chain.count
-        val cancelActions = chain.hasActions
         val held = chain.clear()
         if (positionConfirmed) motionCorrections++ else failed++
         epoch++
@@ -1003,20 +1110,39 @@ object ZpbwRuntime {
             p.player.yRot = yaw; p.player.xRot = pitch
             rebaseSender(p.player, forceLook = true)
         }
-        forwardEnvelope(p.stream, held, "fallback", cancelActions)
+        // This generation is abandoned. Its old input/sprint/TickEnd history must not
+        // advance the server clock in a burst after a stall; only synchronization survives.
+        forwardRecoveryEnvelope(p.stream, held)
+        val controls = p.player as ZpbwPlayerAccessor
+        controls.`zpbw$setLastSentInput`(transmittedControls.input)
+        controls.`zpbw$setWasSprinting`(transmittedControls.sprinting)
+        // Preserve any NSD commitment that really left the client. The next native sample
+        // owns changed input; recovery does not send input or clear the NSD latch itself.
+        if (restore) movementInputs.rebase()
         if (restore) {
             // A timeout can roll back to the exact last transmitted position. Forcing a
             // heartbeat there invents a redundant position report (Grim BadPacketsV).
-            // Include the original held TickEnds above, then restore the real sender history.
+            // Discarded speculative ticks do not advance the actual sender history.
             val sender = p.player as ZpbwPlayerAccessor
             transmittedPosition.position?.let {
                 sender.`zpbw$setXLast`(it.x); sender.`zpbw$setYLast`(it.y); sender.`zpbw$setZLast`(it.z)
             }
             sender.`zpbw$setPositionReminder`(transmittedPosition.reminder)
         }
+        // tick() picks before handleKeybinds(), whose HEAD may expire this warp. Its next
+        // native attack/use must not consume the cached target from the abandoned location.
+        refreshRecoveryPick()
         // Local chat only: no outgoing chat packet and no rate limit hiding an individual failure.
         mc.gui.chatListener().handleSystemMessage(if (timeout != null) ZpbwMessages.timeout(timeout)
             else ZpbwMessages.failure(p.target.point(), actual?.point(), reason, positionConfirmed), false)
+    }
+    private fun refreshRecoveryPick() {
+        val input = mc as ZpbwMinecraftAccessor
+        // Native pick can return early without a camera; never leave a speculative target
+        // behind in that case. This performs a raycast only, not an attack or interaction.
+        input.`zpbw$setHitResult`(null)
+        mc.crosshairPickEntity = null
+        input.`zpbw$pick`(1.0f)
     }
     private fun prepareReplayLook(player: LocalPlayer) {
         // A genuine absolute teleport can return the previous server look. The first natural
@@ -1046,8 +1172,21 @@ object ZpbwRuntime {
         if (cancelWorldActions) event("FAST_ACTIONS_CANCELLED count=${held.count { it is Held.Action || (it is Held.Wire && FastActionPolicy.worldAction(it.packet)) }} reason=$reason")
         if (held.isNotEmpty()) event("COALESCED reason=$reason droppedMovement=${held.count { it is Held.Wire && it.packet is ServerboundMovePlayerPacket }} originalEnvelope=${held.count { it is Held.Wire && it.packet !is ServerboundMovePlayerPacket }}")
     }
+    private fun forwardRecoveryEnvelope(stream: Connection, held: List<Held>) {
+        var forwarded = 0
+        bypass = true
+        try { for (entry in held) if (entry is Held.Wire && !RecoveryPacketPolicy.discard(entry.packet)) {
+            stream.send(entry.packet)
+            forwarded++
+        } } finally { bypass = false }
+        event("RECOVERY_JOURNAL_CANCELLED discarded=${held.size - forwarded} synchronized=$forwarded")
+    }
     @JvmStatic fun admitted(connection: Connection, packet: Packet<*>) {
         if (connection !== connected) return
+        // Keep the actual use angles beyond the short high-volume movement tail. This is
+        // diagnostic admission evidence, never a claim that the server accepted the use.
+        if (packet is ServerboundUseItemPacket)
+            log.record("USE_NETTY_ADMITTED sequence=${packet.sequence} yaw=${packet.yRot} pitch=${packet.xRot}")
         if (packet is ServerboundUseItemPacket || packet is ServerboundMovePlayerPacket ||
             packet is ServerboundAcceptTeleportationPacket || packet is ServerboundClientTickEndPacket ||
             packet is ServerboundPlayerInputPacket || packet is ServerboundPlayerCommandPacket)

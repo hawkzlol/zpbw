@@ -10,7 +10,7 @@ class SkyblockSignalsTest {
         assertTrue(SkyblockSignals.matches("SkyBlock CO-OP", emptyList(), emptyList()))
     }
 
-    @Test fun recognizesTheSameSidebarHintsAsBlackwell() {
+    @Test fun recognizesSidebarHintsWithoutOtherMods() {
         listOf("Purse: 100", "Piggy: 5", "Bits: 0", "The Catacombs (F7)", "Dungeon: Master Mode").forEach {
             assertTrue(SkyblockSignals.matches("", listOf("§7$it"), emptyList()), it)
         }
@@ -19,6 +19,20 @@ class SkyblockSignalsTest {
     @Test fun recognizesNonemptyTabArea() {
         assertTrue(SkyblockSignals.matches("", emptyList(), listOf("§bArea: §7Hub")))
         assertTrue(SkyblockSignals.matches("", emptyList(), listOf("Other line\n Area : Dungeon Hub ")))
+    }
+
+    @Test fun recognizesMultilineHeaderAndFooterSignals() {
+        assertTrue(SkyblockSignals.matches("", emptyList(), listOf("Players online\n§bArea: §7Hub\nProfile: Apple")))
+        assertTrue(SkyblockSignals.matches("", emptyList(), listOf("", "Visit the store\r\nArea: The Catacombs")))
+        assertFalse(SkyblockSignals.matches("", emptyList(), listOf("Welcome to Hypixel\nStore: example.invalid")))
+    }
+
+    @Test fun normalizesUnicodeSpacingAndRejectsDecorativeAreaLabels() {
+        assertTrue(SkyblockSignals.matches("", emptyList(), listOf("\u00a0Area\u00a0:\u2007Hub\u00a0")))
+        assertTrue(SkyblockSignals.matches("", listOf("The\u00a0Catacombs (F7)"), emptyList()))
+        listOf("Area: §7   ", "Area: ---", "Area: ⏣", "Area: \u00a0\u2007").forEach {
+            assertFalse(SkyblockSignals.matches("", emptyList(), listOf(it)), it)
+        }
     }
 
     @Test fun recognizesDungeonFloorCodesOnlyInCatacombsContext() {

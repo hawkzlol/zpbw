@@ -10,7 +10,11 @@ import org.spongepowered.asm.mixin.injection.callback.*;
 public abstract class ZpbwEntityClickMixin {
     @Inject(method="startAttack",at=@At("HEAD"),cancellable=true)
     private void attack(CallbackInfoReturnable<Boolean> ci) {
-        if (ZpbwRuntime.deferEntityClick(true)) ci.setReturnValue(false);
+        if (ZpbwRuntime.deferEntityClick(true) || ZpbwRuntime.deferBlockAttack(false, true)) ci.setReturnValue(false);
+    }
+    @Inject(method="continueAttack",at=@At("HEAD"),cancellable=true)
+    private void continueAttack(boolean attackHeld, CallbackInfo ci) {
+        if (ZpbwRuntime.deferBlockAttack(true, attackHeld)) ci.cancel();
     }
     @Inject(method="startUseItem",at=@At("HEAD"),cancellable=true)
     private void use(CallbackInfo ci) {

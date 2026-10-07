@@ -105,8 +105,7 @@ class FastActionPolicyTest {
         assertFalse(FastActionPolicy.worldAction(ServerboundPlayerInputPacket(Input.EMPTY)))
         assertFalse(FastActionPolicy.worldAction(ServerboundClientTickEndPacket.INSTANCE))
         val runtime = Files.readString(Path.of("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt"))
-        assertContains(runtime, "val cancelActions = chain.hasActions")
-        assertContains(runtime, "forwardEnvelope(p.stream, held, \"fallback\", cancelActions)")
+        assertContains(runtime, "forwardRecoveryEnvelope(p.stream, held)")
     }
 
     @Test fun deferredNativeActionDoesNotConsumeItemOrSequenceWhenPredictionIsCancelled() {
@@ -131,7 +130,9 @@ class FastActionPolicyTest {
         assertContains(runtime, "pose.restore(player); player.inventory.setSelectedSlot(slot)")
         assertContains(runtime, "advanced.restore(player); player.inventory.setSelectedSlot(currentSlot)")
         assertContains(runtime, "accessor.`zpbw\$syncCarriedItem`()")
-        for (kind in listOf("block_use", "entity_use", "start_dig", "continue_dig", "attack"))
+        assertContains(mixin, "ZpbwRuntime.deferMining(fixed, false")
+        assertContains(mixin, "ZpbwRuntime.deferMining(fixed, true")
+        for (kind in listOf("block_use", "entity_use", "attack"))
             assertContains(mixin, "ZpbwRuntime.deferAction(\"$kind\"")
     }
 
