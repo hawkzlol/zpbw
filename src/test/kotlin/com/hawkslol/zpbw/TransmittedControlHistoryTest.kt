@@ -30,8 +30,11 @@ class TransmittedControlHistoryTest {
         assertEquals(sneak, latch.sample(forwardJump))
         assertEquals(restoredCache, latch.value) // Identical native input remains suppressed for this tick.
         latch.finishTick()
-        assertEquals(forwardJump, latch.commitDeferred())
-        assertNotEquals(restoredCache, latch.value)
+        assertNull(latch.value)
+        assertEquals(Input.EMPTY, latch.sample(Input.EMPTY), "Recovery must not replay the abandoned forward/jump snapshot")
+        assertEquals(sneak, history.input, "Sampling alone never advances transmitted history")
+        history.sent(ServerboundPlayerInputPacket(Input.EMPTY))
+        assertEquals(Input.EMPTY, history.input)
     }
 
     @Test fun sprintCacheReflectsOnlyTransmittedTransitionsAndUnrelatedCommandsDoNotChangeIt() {

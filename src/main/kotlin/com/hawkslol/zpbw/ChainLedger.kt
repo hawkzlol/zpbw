@@ -16,7 +16,10 @@ class ChainLedger<P, T>(private val capacity: Int = 512) {
     val head get() = pending.firstOrNull()
     val tail get() = pending.lastOrNull()
     val handling get() = head?.realId != null
-    val canAdd get() = count < maximum && !handling && !hasActions && !hasConfirmedPrefix && (tail == null || tail!!.cut)
+    fun pendingSnapshot(): List<Entry<P>> = pending.toList()
+    val canAdd get() = count < maximum && !handling && !hasActions && (tail == null || tail!!.cut)
+    /** Only a warp may extend outstanding speculation. World actions wait for settlement. */
+    fun canDispatch(warp: Boolean) = !handling && (count == 0 || (warp && canAdd))
     fun add(generation: Long, value: P) {
         check(canAdd && packets.isEmpty())
         pending.addLast(Entry(generation, value))

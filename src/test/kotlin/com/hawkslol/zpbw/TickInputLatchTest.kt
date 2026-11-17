@@ -25,24 +25,24 @@ class TickInputLatchTest {
             latch.sampled(); latch.finishTick(); assertNull(latch.value)
         }
     }
-    @Test fun shortJumpAfterCommitIsDelayedInsteadOfLost() {
+    @Test fun nextUncommittedSampleUsesCurrentJumpInsteadOfReplayingAnObsoleteTap() {
         val latch = TickInputLatch<Int>(); latch.commit(32)
         assertEquals(32,latch.sample(48)); latch.finishTick()
-        assertFalse(latch.commit(0), "An early send cannot overtake the delayed jump")
-        assertEquals(48,latch.sample(0)); latch.finishTick()
-        assertEquals(0,latch.sample(0)); assertNull(latch.deferred)
+        assertEquals(0,latch.sample(0), "An unsent jump that has ended must not be replayed a tick later")
+        assertNull(latch.value)
     }
-    @Test fun changingInputsStayBoundedToOneDeferredSampleAndDrain() {
+    @Test fun movementDoesNotRemainOneSnapshotBehindAfterTheCommitment() {
         val latch = TickInputLatch<Int>(); latch.commit(32)
         assertEquals(32,latch.sample(8)); latch.finishTick()
-        assertEquals(8,latch.sample(16)); assertEquals(16,latch.sample(0))
-        assertEquals(0,latch.sample(0)); assertNull(latch.deferred)
+        assertEquals(16,latch.sample(16)); latch.finishTick()
+        assertEquals(0,latch.sample(0)); latch.finishTick()
+        assertEquals(64,latch.sample(64))
     }
-    @Test fun deferredTapCanBeReportedEarlyInNextNaturalWindow() {
+    @Test fun nextEarlySneakEdgeCommitsAFreshSnapshotWithoutAnOlderDeferredSend() {
         val latch = TickInputLatch<Int>(); latch.commit(32); latch.sample(48)
-        assertNull(latch.commitDeferred()); latch.finishTick()
-        assertEquals(48,latch.commitDeferred()); assertNull(latch.deferred)
-        assertFalse(latch.commit(0)); assertEquals(48,latch.sample(0))
-        latch.finishTick(); assertEquals(0,latch.commitDeferred())
+        assertFalse(latch.commit(0)); latch.finishTick()
+        assertTrue(latch.commit(8), "Only a fresh early send may commit the next input window")
+        assertEquals(8,latch.sample(0)); latch.finishTick()
+        assertEquals(0,latch.sample(0))
     }
 }

@@ -80,7 +80,8 @@ class ZpbwBoundaryTest {
         assertContains(source, "method = \"sendPosition\"")
         val sourceTick = runtime.substringAfter("fun sourceTick(player:").substringBefore("fun sourceTickFinished(")
         assertTrue(sourceTick.indexOf("chain.coalesce()") < sourceTick.indexOf("val sender ="))
-        assertContains(sourceTick, "val collision = sentCollision ?:")
+        assertContains(sourceTick, "transmittedCollisions.sourceFlags(chain.hasConfirmedPrefix)")
+        assertContains(sourceTick, "p.sourcePose.copy(ground = physicsCollision.first")
         assertContains(sourceTick, "player.setOnGround(collision.first)")
         assertFalse(sourceTick.contains("player.setOnGround(false)"))
         val physics = runtime.substringAfter("fun afterPhysicsUpdate()").substringBefore("fun previousSneakForPhysics(")
@@ -111,7 +112,7 @@ class ZpbwBoundaryTest {
         assertContains(runtime, "ZpbwMessages.failure(p.target.point(), actual?.point(), reason, positionConfirmed), false)")
         assertContains(runtime, "decision.motionCorrection")
         assertContains(runtime, "recover(decision.reason, actual = absolute.position(), positionConfirmed = true)")
-        val recovery = runtime.substringAfter("private fun recover(").substringBefore("private fun prepareReplayLook(")
+        val recovery = runtime.substringAfter("private fun recover(").substringBefore("fun beforeRecoveryPhysics(")
         assertContains(recovery, "`zpbw\$setPositionReminder`(transmittedPosition.reminder)")
         assertFalse(recovery.contains("`zpbw\$setPositionReminder`(20)"))
         assertContains(recovery, "forwardRecoveryEnvelope(p.stream, held)")
@@ -139,6 +140,7 @@ class ZpbwBoundaryTest {
         assertFalse(pick.contains("startUseItem"))
         assertFalse(pick.contains("mc.execute"), "The target must be refreshed before this frame resumes controls")
     }
+
     @Test fun settingsLoadAtStartupAndSessionsClearOnlyInFlightState() {
         assertContains(runtime, "gameDir.resolve(\"config/zpbw\")")
         assertContains(runtime, "mode = if (settings.enabled) Mode.REPLAY else Mode.OFF")

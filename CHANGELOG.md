@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.0.2 - 2026-11-17
+
+### NoSneakDelay
+
+- Use current keys at the next uncommitted native sample instead of replaying stale movement, jump or sprint input.
+- Preserve early sneak, immediate sneak-use behavior and brief taps. The first sample required by an already-transmitted input remains committed; this does not remove its movement delay.
+
+### Chaining and recovery
+
+- Reuse each pending slot as its genuine confirmation arrives, keeping successful chains moving without waiting for the whole chain to drain.
+- Queue up to five additional warp clicks when the five prediction slots are full; dispatch at most one queued click per native input tick.
+- Keep mining, entity clicks and other world interactions behind the movement and source tick they depend on.
+- Fix failed chains resuming speculative movement before their remaining genuine teleports arrive. A bounded recovery pause drains those responses, then resumes from fresh native input.
+- Invalidate pending speculation when a real server knockback or explosion changes player motion. Preserve the native impulse if no teleport follows, and let genuine teleports supersede it.
+- Preserve native teleport acknowledgements, inventory synchronization, click cleanup and world/session/ownership boundaries throughout recovery.
+
+### Verification and limits
+
+- 237 automated mod tests pass. Scoped runtime results and remaining limits are recorded in `docs/validation-1.0.2.md`.
+- Official release approved with the documented limitations. Scoped offline qualification is complete. Known baseline attribute synchronization, raw-Ping timeout behavior and delayed-server semantics are documented in `docs/validation-1.0.2.md`.
+- The five-pending limit and nonzero-Ping timeout remain. Bursty server traffic at high latency can still expire predictions; recovery is distinct from successful continuous prediction.
+- Failure recovery can briefly pause movement and dependent actions for up to a separate 20 nonzero server Ping packets. Successful chaining is unchanged by that barrier.
+- No extra gameplay packets, simulation ticks or TickEnd packets are introduced by these recovery fixes. No anti-cheat checks or production focus/GUI protections are weakened.
+
 ## 1.0.1 — 2026-10-07
 
 ### Fixes

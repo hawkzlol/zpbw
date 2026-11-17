@@ -25,7 +25,7 @@ object NoSneakDelay {
 
     fun configure(value: Boolean) { if (enabled != value) binding.reset(); enabled = value } // Honor an already-sent commitment through its tick.
     fun reset() { latch.clear(); binding.reset(); player = null; level = null; stream = null }
-    fun hasCommitment() = latch.value != null || latch.deferred != null
+    fun hasCommitment() = latch.value != null
     private fun bind(): LocalPlayer? {
         val p = mc.player
         val connection = mc.connection?.connection
@@ -45,13 +45,6 @@ object NoSneakDelay {
         val options = mc.options
         val shift = options.keyShift.isDown
         if (shift && (mc.gui.screen() != null || !mc.isWindowActive)) return
-        val delayed = latch.commitDeferred()
-        if (delayed != null) {
-            p.connection.send(ServerboundPlayerInputPacket(delayed))
-            ZpbwRuntime.sneakEvent("DEFERRED_COMMIT shift=${delayed.shift()}")
-            if (binding.pending == delayed.shift()) binding.consumed()
-            return
-        }
         if (binding.pending == null) return
         if (shift == p.input.keyPresses.shift()) { binding.consumed(); return }
         val early = Input(options.keyUp.isDown, options.keyDown.isDown, options.keyLeft.isDown,
@@ -65,7 +58,7 @@ object NoSneakDelay {
     @JvmStatic fun applySample(input: ClientInput) {
         if (ZpbwRuntime.externalPredictionActive()) return
         val p = bind() ?: return
-        if (latch.value == null && latch.deferred == null) return
+        if (latch.value == null) return
         if (input !== p.input) return
         val committed = latch.sample(input.keyPresses)
         input.keyPresses = committed
@@ -78,7 +71,6 @@ object NoSneakDelay {
         !ZpbwRuntime.externalPredictionActive() && packet is ServerboundPlayerInputPacket && latch.value == packet.input
     fun inputForClick(): Input? = if (ZpbwRuntime.externalPredictionActive()) null else ZpbwRuntime.deferredUseInput() ?: latch.value
     fun sneakForPrediction(): Boolean? = inputForClick()?.shift()
-        ?: if (latch.deferred != null) mc.player?.input?.keyPresses?.shift() else null
 
     /** Native click semantics see the committed input, while previous-tick physics history is restored. */
     @JvmStatic fun beginClick(): Input? {

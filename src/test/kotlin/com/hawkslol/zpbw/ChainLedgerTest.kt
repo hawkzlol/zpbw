@@ -35,12 +35,34 @@ class ChainLedgerTest {
         (1L..5L).forEach { c.use(it) }
         assertEquals(5, c.count); assertFalse(c.canAdd)
         assertFailsWith<IllegalStateException> { c.add(6, "use6") }
-        c.confirm(1, 90); assertFalse(c.canAdd); assertTrue(c.hasConfirmedPrefix)
-        assertFailsWith<IllegalStateException> { c.use(6) }
-        assertEquals(4, c.count)
+        c.confirm(1, 90); assertTrue(c.canAdd); assertTrue(c.hasConfirmedPrefix)
+        c.use(6); assertEquals(5, c.count); assertFalse(c.canAdd)
         (2L..5L).forEach { c.confirm(it, it.toInt()+90) }
-        assertFalse(c.hasConfirmedPrefix); c.use(6); c.confirm(6, 96)
+        assertEquals(1, c.count); c.confirm(6, 96); assertFalse(c.hasConfirmedPrefix)
         assertEquals(0, c.count)
+    }
+    @Test fun rollingRefillNeverReleasesNewestPhysicsAtAnEarlierConfirmation() {
+        val c = ChainLedger<String, Any>(); (1L..5L).forEach { c.use(it) }
+        for (g in 1L..40L) {
+            val motion = Any(); c.retain(motion)
+            assertTrue(c.confirm(g, g.toInt()+100).isEmpty())
+            assertTrue(c.canDispatch(true)); assertFalse(c.canDispatch(false))
+            assertSame(motion, c.coalesce().single())
+            c.use(g+5); assertEquals(5, c.count)
+        }
+        val finalMotion = Any(); c.retain(finalMotion)
+        (41L..44L).forEach { assertTrue(c.confirm(it, it.toInt()+100).isEmpty()) }
+        assertSame(finalMotion, c.confirm(45,145).single())
+        assertTrue(c.canDispatch(false))
+    }
+    @Test fun partialConfirmationCannotLetWarpsOvertakeWorldActionsOrNativeResponses() {
+        val c = ChainLedger<String, Any>(); c.use(1); c.use(2)
+        c.genuine(1,10); assertFalse(c.canDispatch(true))
+        c.response(10,true); assertFalse(c.canDispatch(true))
+        c.response(10,false); c.settle(1,10); assertTrue(c.canDispatch(true))
+        val action=Any(); c.retain(action,true)
+        assertFalse(c.canDispatch(true)); assertFalse(c.canDispatch(false))
+        assertSame(action,c.confirm(2,11).single()); assertTrue(c.canDispatch(true))
     }
     @Test fun naturalSourceCutRequiredBeforeAnotherUse() {
         val c = ChainLedger<String, Any>(); c.add(1, "use1")

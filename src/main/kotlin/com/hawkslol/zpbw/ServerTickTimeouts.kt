@@ -51,12 +51,42 @@ class ServerTickTimeouts<S : Any> {
     }
     @Synchronized fun cancel(generation: Long) { timers.remove(generation) }
     @Synchronized fun expiredTickets(): List<Expiry> = timers.values.filter { it.expired }.map { it.ticket }
-    @Synchronized fun claim(ticket: Expiry): Boolean {
+    private fun claimable(ticket: Expiry): Boolean {
         val timer = timers[ticket.generation] ?: return false
         if (timer.ticket !== ticket || !timer.expired) return false
         // A predecessor's already-arrived response must run before recovery of this suffix.
         if (timers.values.takeWhile { it !== timer }.any { it.arrived }) return false
+        return true
+    }
+    @Synchronized fun claim(ticket: Expiry): Boolean {
+        if (!claimable(ticket)) return false
         timers.remove(ticket.generation)
         return true
+    }
+
+    /** Retire an expiry and atomically establish a bounded transport-drain interval.
+     * Preserve packets already received by Netty but still queued for their native handler.
+     * Fresh ticket identity invalidates every callback from the failed prediction interval. */
+    @Synchronized fun restartAfterExpiry(session: S, ticket: Expiry, generations: List<Long>, ticks: Int): Boolean {
+        require(ticks in 2..30)
+        require(generations.size in 1..5 && generations.distinct().size == generations.size && ticket.generation in generations)
+        if (this.session !== session || !claimable(ticket) || generations != timers.keys.toList()) return false
+        replaceRecoveryTimers(generations, ticks)
+        return true
+    }
+    /** A real native physics boundary invalidates speculation before its deadline. */
+    @Synchronized fun restartForRecovery(session: S, generations: List<Long>, ticks: Int): Boolean {
+        require(ticks in 2..30)
+        require(generations.size in 1..5 && generations.distinct().size == generations.size)
+        if (this.session !== session || generations != timers.keys.toList()) return false
+        replaceRecoveryTimers(generations, ticks)
+        return true
+    }
+    /** Both callers hold this clock's monitor across receipt preservation and replacement. */
+    private fun replaceRecoveryTimers(generations: List<Long>, ticks: Int) {
+        val arrived = generations.associateWith { timers[it]?.arrived == true }
+        timers.clear()
+        for (generation in generations)
+            timers[generation] = Timer(Expiry(generation, ticks), ticks, arrived = arrived.getValue(generation))
     }
 }

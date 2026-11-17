@@ -2,6 +2,28 @@
   "required": true,
   "package": "com.hawkslol.zpbw.mixin",
   "compatibilityLevel": "JAVA_25",
-  "client": ["ZpbwTabOverlayAccessor", "ZpbwInputDispatchMixin", "ZpbwConnectionMixin", "ZpbwTeleportMixin", "ZpbwUseMixin", "ZpbwPlayerAccessor", "ZpbwSourceTickMixin", "ZpbwGameModeAccessor", "ZpbwPhysicsMixin", "ZpbwMinecraftAccessor", "ZpbwEntityClickMixin", "ZpbwSneakMixin", "ZpbwSneakSampleMixin", "ZpbwInputAccessor", "ZpbwLatchedInputMixin", "ZpbwLatchedClickMixin", "ZpbwLatchedGameModeMixin"],
-  "injectors": {"defaultRequire": 1}
+  "client": [
+    "ZpbwTabOverlayAccessor",
+    "ZpbwInputDispatchMixin",
+    "ZpbwConnectionMixin",
+    "ZpbwTeleportMixin",
+    "ZpbwUseMixin",
+    "ZpbwPlayerAccessor",
+    "ZpbwSourceTickMixin",
+    "ZpbwGameModeAccessor",
+    "ZpbwPhysicsMixin",
+    "ZpbwMinecraftAccessor",
+    "ZpbwEntityClickMixin",
+    "ZpbwSneakMixin",
+    "ZpbwSneakSampleMixin",
+    "ZpbwInputAccessor",
+    "ZpbwLatchedInputMixin",
+    "ZpbwLatchedClickMixin",
+    "ZpbwLatchedGameModeMixin",
+    "ZpbwRecoveryMotionMixin",
+    "ZpbwAuthoritativeMotionMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
 }

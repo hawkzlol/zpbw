@@ -65,15 +65,16 @@ class PredictionOwnershipTest {
         val lease = bound(); val owner = Any(); val chain = ChainLedger<String, String>(); val latch = TickInputLatch<String>()
         fun acquire() = lease.tryAcquire(owner, true, PredictionOwnership.DrainState(
             pending = chain.count, retained = chain.size, actions = chain.hasActions,
-            handling = chain.handling, inputCommitted = latch.value != null || latch.deferred != null))
+            handling = chain.handling, inputCommitted = latch.value != null))
         chain.add(1, "warp"); chain.cut(1); chain.retain("click", action = true)
         assertFalse(acquire()); chain.genuine(1, 42); assertFalse(acquire())
         chain.response(42, true); assertFalse(acquire()); chain.response(42, false)
         assertEquals(listOf("click"), chain.settle(1, 42))
         latch.commit("sneak"); assertFalse(acquire())
-        latch.sample("unsneak"); latch.finishTick(); assertFalse(acquire())
-        latch.commitDeferred(); latch.sample("unsneak"); latch.finishTick()
+        latch.sample("unsneak"); assertFalse(acquire())
+        latch.finishTick()
         assertTrue(acquire()); assertTrue(lease.release(owner, true))
+        assertEquals("current", latch.sample("current"), "Ownership handoff must not leave an old deferred input")
         // The same ledger can predict normally again; handoff never toggles or retires it.
         chain.add(2, "manual"); chain.cut(2); assertEquals(1, chain.count)
         assertFalse(acquire())

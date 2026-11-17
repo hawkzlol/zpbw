@@ -49,7 +49,7 @@ class ExternalLeaseContractTest {
     }
     @Test fun nsdCannotCommitOrOverrideInputWhileLeased() {
         val nsd = root.resolve("src/main/kotlin/com/hawkslol/zpbw/NoSneakDelay.kt").readText()
-        assertContains(nsd, "fun hasCommitment() = latch.value != null || latch.deferred != null")
+        assertContains(nsd, "fun hasCommitment() = latch.value != null")
         for (name in listOf("frame", "applySample", "beginClick", "finishTick")) {
             val body = nsd.substringAfter("fun $name(").substringBefore("\n    }")
             assertContains(body, "ZpbwRuntime.externalPredictionActive()")

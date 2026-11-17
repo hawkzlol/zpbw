@@ -19,7 +19,8 @@ class InputDispatchContractTest {
         val tick=node.methods.single { it.name=="tick" && it.desc=="()V" }
         assertTrue(tick.instructions.toArray().filterIsInstance<MethodInsnNode>().any { it.name=="handleKeybinds" })
         val dispatcher=runtime.substringAfter("fun dispatchWaitingInput()").substringBefore("fun finishInputDispatchTick")
-        assertContains(dispatcher,"chain.count != 0 || handling != null || bypass")
+        assertContains(dispatcher,"handling != null || bypass")
+        assertContains(dispatcher,"if (!chain.canDispatch(next.warp)) return")
         assertContains(dispatcher,"waitingInputs.removeFirst()")
         assertFalse(dispatcher.contains("bypass = true"))
         assertFalse(dispatcher.contains("setPos("))
@@ -29,6 +30,9 @@ class InputDispatchContractTest {
     @Test fun waitingActionsCannotOvertakeTheWarpOrSurviveALifecycleFailure() {
         val deferral=runtime.substringAfter("fun deferAction(").substringBefore("fun joined()")
         assertTrue(deferral.indexOf("return queueInput") < deferral.indexOf("val tail = chain.tail"))
+        assertTrue(deferral.indexOf("chain.tail?.cut == false") in 0 until deferral.indexOf("val tail = chain.tail"),
+            "World actions must queue even before a newly dispatched warp closes its source tick")
+        assertContains(runtime, "if (dispatchingInput != null || chain.hasConfirmedPrefix) queuedTickAim = packet.yRot to packet.xRot")
         assertContains(runtime,"cancelWaitingInputs(\"unrelated_teleport\")")
         assertContains(runtime,"cancelWaitingInputs(\"session_changed\")")
         assertContains(runtime,"cancelWaitingInputs(\"disabled\")")

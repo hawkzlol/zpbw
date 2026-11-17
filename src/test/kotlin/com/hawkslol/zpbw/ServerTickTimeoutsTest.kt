@@ -6,6 +6,117 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.*
 
 class ServerTickTimeoutsTest {
+    @Test fun nativeMotionRecoveryPreservesQueuedReceiptsAndDoesNotAdvanceTheClock() {
+        val session=Any();val clock=ServerTickTimeouts<Any>();clock.bind(session)
+        clock.start(session,1,20);clock.start(session,2,20)
+        repeat(7){clock.ping(session,1)}
+        clock.teleport(session)
+        assertTrue(clock.restartForRecovery(session,listOf(1,2),20))
+        assertEquals(7L,clock.sample(session))
+        repeat(19){assertTrue(clock.ping(session,1).isEmpty())}
+        val expiry=clock.ping(session,1).single()
+        assertEquals(2L,expiry.generation)
+        assertFalse(clock.claim(expiry));clock.cancel(1);assertTrue(clock.claim(expiry))
+    }
+    @Test fun nativeMotionRecoveryInvalidatesOldExpiryCallbacksWithoutFabricatingAnArrival() {
+        val session=Any();val clock=ServerTickTimeouts<Any>();clock.bind(session)
+        clock.start(session,1,2);clock.ping(session,1);val old=clock.ping(session,1).single()
+        assertTrue(clock.restartForRecovery(session,listOf(1),20))
+        assertFalse(clock.claim(old));repeat(19){assertTrue(clock.ping(session,1).isEmpty())}
+        val fresh=clock.ping(session,1).single();assertEquals(1L,fresh.generation);assertTrue(clock.claim(fresh))
+    }
+    @Test fun nativeMotionCannotRestartAnotherSessionOrAnIncompleteOrReorderedLedger() {
+        val session=Any();val clock=ServerTickTimeouts<Any>();clock.bind(session)
+        clock.start(session,1,2);clock.start(session,2,2)
+        assertFalse(clock.restartForRecovery(Any(),listOf(1,2),20))
+        assertFalse(clock.restartForRecovery(session,listOf(1),20))
+        assertFalse(clock.restartForRecovery(session,listOf(2,1),20))
+        clock.ping(session,1);assertEquals(listOf(1L,2L),clock.ping(session,1).map{it.generation})
+    }
+    @Test fun nativeMotionRestartAndConcurrentRealArrivalKeepTheSameFifoOwner() {
+        val pool=Executors.newFixedThreadPool(2)
+        try{repeat(200){
+            val session=Any();val clock=ServerTickTimeouts<Any>();clock.bind(session)
+            clock.start(session,1,20);clock.start(session,2,20)
+            val start=CyclicBarrier(2)
+            val restart=pool.submit<Boolean>{start.await();clock.restartForRecovery(session,listOf(1,2),20)}
+            val arrival=pool.submit{start.await();clock.teleport(session)}
+            assertTrue(restart.get(5,TimeUnit.SECONDS));arrival.get(5,TimeUnit.SECONDS)
+            repeat(19){assertTrue(clock.ping(session,1).isEmpty())}
+            val second=clock.ping(session,1).single();assertEquals(2L,second.generation)
+            assertFalse(clock.claim(second));clock.cancel(1);assertTrue(clock.claim(second))
+        }}finally{pool.shutdownNow()}
+    }
+
+    @Test fun racingRecoveryRestartAndRealArrivalCannotShiftTheReceiptToASuccessor() {
+        val pool=Executors.newFixedThreadPool(2)
+        try { repeat(200) {
+            val session=Any(); val clock=ServerTickTimeouts<Any>(); clock.bind(session)
+            clock.start(session,1,2); clock.start(session,2,20)
+            clock.ping(session,1); val old=clock.ping(session,1).single()
+            val start=CyclicBarrier(2)
+            val restart=pool.submit<Boolean> { start.await(); clock.restartAfterExpiry(session,old,listOf(1,2),20) }
+            val arrival=pool.submit { start.await(); clock.teleport(session) }
+            assertTrue(restart.get(5,TimeUnit.SECONDS)); arrival.get(5,TimeUnit.SECONDS)
+            repeat(19) { assertTrue(clock.ping(session,1).isEmpty()) }
+            val suffix=clock.ping(session,1).single(); assertEquals(2L,suffix.generation)
+            assertFalse(clock.claim(suffix)); clock.cancel(1); assertTrue(clock.claim(suffix))
+        } } finally { pool.shutdownNow() }
+    }
+
+    @Test fun recoveryRestartRetiresAllOldCallbacksAndUsesOneFreshBound() {
+        val session=Any(); val clock=ServerTickTimeouts<Any>(); clock.bind(session)
+        clock.start(session,1,2); clock.start(session,2,2)
+        clock.ping(session,1); val old=clock.ping(session,1)
+        assertFalse(clock.restartAfterExpiry(session,old.first(),listOf(1),20))
+        assertFalse(clock.restartAfterExpiry(session,old.first(),listOf(1,2,3),20))
+        assertTrue(clock.restartAfterExpiry(session,old.first(),listOf(1,2),20))
+        assertTrue(clock.expiredTickets().isEmpty()); old.forEach { assertFalse(clock.claim(it)) }
+        repeat(19) { assertTrue(clock.ping(session,0).isEmpty()); assertTrue(clock.ping(session,-1).isEmpty()) }
+        val fresh=clock.ping(session,-1)
+        assertEquals(listOf(1L,2L),fresh.map { it.generation })
+        fresh.forEach { assertEquals(20,it.ticks); assertTrue(clock.claim(it)) }
+    }
+
+    @Test fun queuedNativeArrivalSurvivesAtomicRecoveryRestart() {
+        val session=Any(); val clock=ServerTickTimeouts<Any>(); clock.bind(session)
+        clock.start(session,1,2); clock.start(session,2,20)
+        clock.ping(session,1); val old=clock.ping(session,1).single()
+        clock.teleport(session) // Actual arrival follows the old deadline, before its main task.
+        assertTrue(clock.restartAfterExpiry(session,old,listOf(1,2),20))
+        repeat(19) { assertTrue(clock.ping(session,1).isEmpty()) }
+        val suffix=clock.ping(session,1).single(); assertEquals(2L,suffix.generation)
+        assertFalse(clock.claim(suffix), "A fresh recovery callback cannot overtake the already queued native teleport")
+        clock.cancel(1); assertTrue(clock.claim(suffix))
+    }
+
+    @Test fun nativeArrivalAfterRestartStillOwnsTheOriginalFifoGeneration() {
+        val session=Any(); val clock=ServerTickTimeouts<Any>(); clock.bind(session)
+        for(id in 1L..5L) clock.start(session,id,2)
+        clock.ping(session,1); val old=clock.ping(session,1)
+        assertTrue(clock.restartAfterExpiry(session,old.first(),(1L..5L).toList(),20))
+        repeat(5) { index -> clock.teleport(session); clock.cancel(index+1L) }
+        repeat(100) { assertTrue(clock.ping(session,1).isEmpty()) }
+        assertTrue(clock.expiredTickets().isEmpty()); old.forEach { assertFalse(clock.claim(it)) }
+    }
+
+    @Test fun recoveryRestartCannotRearmALiveStaleOrDifferentSessionTicket() {
+        val session=Any(); val clock=ServerTickTimeouts<Any>(); clock.bind(session)
+        clock.start(session,1,2); clock.ping(session,1); val old=clock.ping(session,1).single()
+        assertFalse(clock.restartAfterExpiry(Any(),old,listOf(1),20))
+        assertTrue(clock.restartAfterExpiry(session,old,listOf(1),20))
+        assertFalse(clock.restartAfterExpiry(session,old,listOf(1),20))
+        clock.bind(session); assertFalse(clock.restartAfterExpiry(session,old,listOf(1),20))
+    }
+
+    @Test fun recoveryRestartDoesNotOvertakeAnEarlierReceivedNativeHandler() {
+        val session=Any(); val clock=ServerTickTimeouts<Any>(); clock.bind(session)
+        clock.start(session,1,20); clock.start(session,2,2); clock.teleport(session)
+        clock.ping(session,1); val suffix=clock.ping(session,1).single()
+        assertFalse(clock.restartAfterExpiry(session,suffix,listOf(1,2),20))
+        clock.cancel(1); assertTrue(clock.restartAfterExpiry(session,suffix,listOf(2),20))
+    }
+
     @Test fun separateMainTaskQueueCannotOvertakeAnArrivedPredecessor() {
         val session=Any(); val clock=ServerTickTimeouts<Any>(); clock.bind(session)
         clock.start(session,1,20); clock.start(session,2,2)

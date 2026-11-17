@@ -126,10 +126,10 @@ class MiningInputPolicyTest {
         assertContains(mining, "player.isWithinBlockInteractionRange(target, 0.0)")
         assertContains(mining, "world.getBlockState(target) == expected")
         assertContains(mining, "MiningInputPolicy.canContinue(mc.options.keyAttack.isDown")
-        assertContains(mining, "if (chain.count == 0 && waitingInputs.isEmpty())")
+        assertContains(mining, "if (chain.count == 0 && waitingInputs.isEmpty() && !recoveryResumePending)")
         assertContains(mining, "return continuing && miningReplay.continuedAt(world, world.gameTime)")
         val dispatch = runtime.substringAfter("@JvmStatic fun dispatchWaitingInput()").substringBefore("@JvmStatic fun finishInputDispatchTick()")
-        assertContains(dispatch, "if (chain.count != 0")
+        assertContains(dispatch, "if (!chain.canDispatch(next.warp)) return")
         assertContains(dispatch, "MiningInputPolicy.isMining(next.name)")
         assertContains(dispatch, "ItemStack.isSameItemSameComponents(next.item, player.inventory.getItem(next.slot))")
     }

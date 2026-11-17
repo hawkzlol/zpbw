@@ -14,7 +14,7 @@ Use `/zpbw` to see the available commands.
 
 ## Installation
 
-Download **[ZPBW 1.0.1](https://github.com/hawkzlol/zpbw/releases/tag/v1.0.1)** from GitHub Releases.
+Download **[ZPBW 1.0.2](https://github.com/hawkzlol/zpbw/releases/tag/v1.0.2)** from GitHub Releases.
 
 ZPBW is a client-side mod for **Minecraft Java 26.2**, using **Java 25**, **Fabric Loader 0.19.3 or newer**, **Fabric API** and **Fabric Language Kotlin**. Put the ZPBW JAR and its required Fabric dependencies in your instance's `mods` folder. Remove older ZPBW JARs before installing a replacement.
 
@@ -30,7 +30,9 @@ Every setting below is saved between sessions.
 | `/zpbw timeout <ticks>` | Sets the timeout for new warps. Values are clamped to 2–20; the default is 20. |
 | `/zpbw logs` | Copies troubleshooting information from the current client session to your clipboard. |
 
-NoSneakDelay attempts to send sneak input earlier while preserving packet order. Timeout ticks count nonzero server Ping packets; their cadence can vary by server, so the value is not a fixed wall-clock duration.
+NoSneakDelay attempts to send sneak input earlier while preserving packet order. An early input already sent to the server must remain committed through its first natural input tick; movement-key changes during that interval can wait until the following sample. Once the commitment ends, current keys are sampled directly without replaying an older deferred snapshot.
+
+Timeout ticks count nonzero server Ping packets; their cadence can vary by server, so the value is not a fixed wall-clock duration.
 
 ## Update notifications
 
@@ -54,7 +56,7 @@ With Java 25 installed:
 ./gradlew test build
 ```
 
-On Windows, use `gradlew.bat test build`. The standalone mod is written to `build/libs/zpbw-1.0.1.jar`.
+On Windows, use `gradlew.bat test build`. The standalone mod is written to `build/libs/zpbw-1.0.2.jar`.
 
 # How it works, and why.
 
@@ -110,7 +112,7 @@ A new warp can be predicted from the previous predicted landing position, allowi
 
 Intermediate movement that the server could not have received yet is not blindly replayed between those warps. Blinkwarp keeps the packet stream ordered around the actual etherwarp uses and only releases movement and actions when their corresponding server state has caught up.
 
-Up to **five unconfirmed warps** can overlap before the first confirmation arrives. This limit is fixed. After the first confirmation of an overlapping chain, new warp dispatch briefly waits for the remaining warps to settle. This bounded pause keeps continued chaining in order rather than letting prediction run indefinitely ahead of the server.
+Up to **five unconfirmed warps** can overlap. This limit is fixed. Each genuine confirmation frees a slot for another warp, so continued chaining does not wait for the entire chain to drain. When all five slots are occupied, up to five additional warp clicks can wait in order; at most one queued click is dispatched per native input tick. Queued clicks are rechecked before dispatch and cancelled when their context is no longer valid.
 
 # Prediction failures and recovery
 
@@ -121,6 +123,10 @@ The genuine server teleport is always checked.
 If the server sends a different destination, the prediction expires, the connection or world changes, player state becomes invalid, or another condition makes the pending prediction unsafe, Blinkwarp falls back to the authoritative server state.
 
 Dependent queued actions which have not executed yet are cancelled rather than being fired from a position which is no longer valid.
+
+When an overlapping chain fails, already-sent uses can still have genuine teleports in flight. Blinkwarp briefly pauses body movement and dependent actions while those responses drain, with a separate bound of 20 nonzero server Ping packets. Native input sampling continues. Recovery resumes from the latest authoritative state after a fresh native input sample and its normal TickEnd; it does not create replacement gameplay packets or extra ticks. This pause applies to recovery, rather than successful chaining.
+
+A server knockback or explosion impulse during a pending prediction also invalidates that prediction. The original native motion handler still runs. A later genuine teleport can supersede the impulse; if no teleport arrives, recovery preserves the received impulse when movement resumes.
 
 Already-sent etherwarp uses obviously cannot be taken back, but Blinkwarp will not manufacture another successful teleport on top of a failed prediction.
 

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "zpbw",
-  "version": "${version}",
+  "version": "1.0.2",
   "name": "Zero Ping Blinkwarp",
   "description": "ZPBW: local blinkwarp prediction with ordered packet holding, genuine server reconciliation and server-packet tick timeouts.",
   "environment": "client",
