@@ -36,7 +36,7 @@ Every setting below is saved between sessions.
 | `/zpbw` | Shows the command list. |
 | `/zpbw on` / `/zpbw off` | Enables or disables prediction. |
 | `/zpbw nosneakdelay` or `/zpbw nsd` | Toggles NoSneakDelay. Add `on` or `off` to set it explicitly. |
-| `/zpbw timeout <ticks>` | Sets the timeout for new warps. Values are clamped to 2â€“20; the default is 20. |
+| `/zpbw timeout <ticks>` | Sets the timeout for new warps. Values are clamped to 2–20; the default is 20. |
 | `/zpbw chainmax [value]` | Shows the overlap limit, or saves a signed integer clamped to 1–5 (default 5). |
 | `/zpbw logs` | Copies session troubleshooting information to your clipboard, or prints it to the game console if clipboard access fails. |
 

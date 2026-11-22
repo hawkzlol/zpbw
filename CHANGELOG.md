@@ -52,7 +52,7 @@
 - Failure recovery can briefly pause movement and dependent actions for up to a separate 20 nonzero server Ping packets. Successful chaining is unchanged by that barrier.
 - No extra gameplay packets, simulation ticks or TickEnd packets are introduced by these recovery fixes. No anti-cheat checks or production focus/GUI protections are weakened.
 
-## 1.0.1 â€” 2026-10-07
+## 1.0.1 — 2026-10-07
 
 ### Fixes
 
@@ -77,11 +77,11 @@
 
 ### Verification and remaining limits
 
-- 202 automated mod tests pass. Gameplay fixes were exercised in the owned Grim lab at 25â€“300 ms latency, including mining, interactions, recovery, jumps and Jump Boost V.
+- 202 automated mod tests pass. Gameplay fixes were exercised in the owned Grim lab at 25–300 ms latency, including mining, interactions, recovery, jumps and Jump Boost V.
 - The new detector passed automated checks and mapping verification; a minimal-client/live SkyBlock runtime check has not been completed.
 - Five-warp chaining still pauses new dispatch after the first confirmation until the remaining chain settles. Timeout still counts nonzero server Ping packets; bursts can exhaust its budget. General airborne prediction mismatches remain under investigation.
 
-## 1.0.0 â€” 2026-10-06
+## 1.0.0 — 2026-10-06
 
 - Initial public release of Zero Ping Blinkwarp for Minecraft 26.2.
 - Local landing prediction with ordered packet holding, genuine teleport confirmation, and up to five overlapping warps.

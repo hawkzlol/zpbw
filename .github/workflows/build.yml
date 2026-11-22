@@ -31,3 +31,11 @@ jobs:
         run: |
           python -m unittest discover -s tools -p test_dual_native.py
           python tools/verify_dual_native.py
+      - name: Show native build failure logs
+        if: failure()
+        shell: python
+        run: |
+          from pathlib import Path
+          for log in sorted(Path('artifacts/build-runs').glob('*/mc*.log')):
+              print(str(log))
+              print(log.read_text(encoding='utf-8', errors='replace')[-16000:])
