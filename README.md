@@ -14,9 +14,18 @@ Use `/zpbw` to see the available commands.
 
 ## Installation
 
-Download **[ZPBW 1.0.2](https://github.com/hawkzlol/zpbw/releases/tag/v1.0.2)** from GitHub Releases.
+Download **[ZPBW 1.0.3](https://github.com/hawkzlol/zpbw/releases/tag/v1.0.3)** from GitHub Releases.
 
-ZPBW is a client-side mod for **Minecraft Java 26.2**, using **Java 25**, **Fabric Loader 0.19.3 or newer**, **Fabric API** and **Fabric Language Kotlin**. Put the ZPBW JAR and its required Fabric dependencies in your instance's `mods` folder. Remove older ZPBW JARs before installing a replacement.
+ZPBW is a client-side Fabric mod for **Minecraft Java 26.2 and 26.3**, requiring **Java 25**, **Fabric API** and **Fabric Language Kotlin 1.13.13+kotlin.2.4.10 or newer**.
+
+Choose exactly one matching JAR:
+
+| Minecraft | Download | Minimum Fabric Loader | Minimum Fabric API |
+| --- | --- | --- | --- |
+| 26.2 | `zpbw-mc26.2-1.0.3.jar` | 0.19.3 | 0.155.2+26.2 |
+| 26.3 | `zpbw-mc26.3-1.0.3.jar` | 0.19.5 | 0.165.0+26.3 |
+
+Put the matching JAR and dependencies in `mods`, removing the previous standalone ZPBW JAR. Keep your configuration. Prediction and NoSneakDelay default to off on a fresh installation. Blackwell is not required.
 
 ## Commands
 
@@ -27,16 +36,17 @@ Every setting below is saved between sessions.
 | `/zpbw` | Shows the command list. |
 | `/zpbw on` / `/zpbw off` | Enables or disables prediction. |
 | `/zpbw nosneakdelay` or `/zpbw nsd` | Toggles NoSneakDelay. Add `on` or `off` to set it explicitly. |
-| `/zpbw timeout <ticks>` | Sets the timeout for new warps. Values are clamped to 2–20; the default is 20. |
-| `/zpbw logs` | Copies troubleshooting information from the current client session to your clipboard. |
+| `/zpbw timeout <ticks>` | Sets the timeout for new warps. Values are clamped to 2â€“20; the default is 20. |
+| `/zpbw chainmax [value]` | Shows the overlap limit, or saves a signed integer clamped to 1–5 (default 5). |
+| `/zpbw logs` | Copies session troubleshooting information to your clipboard, or prints it to the game console if clipboard access fails. |
 
 NoSneakDelay attempts to send sneak input earlier while preserving packet order. An early input already sent to the server must remain committed through its first natural input tick; movement-key changes during that interval can wait until the following sample. Once the commitment ends, current keys are sampled directly without replaying an older deferred snapshot.
 
-Timeout ticks count nonzero server Ping packets; their cadence can vary by server, so the value is not a fixed wall-clock duration.
+Timeouts count every nonzero server Ping packet and require a minimum number of completed natural client ticks after a warp is issued. Waiting clicks retain their original admission deadline and Ping anchor. Once a queued warp is issued, its minimum response grace starts then, so waiting cannot consume that grace. No fixed tick duration, extra ticks or extra packets are introduced.
 
 ## Update notifications
 
-ZPBW checks this repository's latest stable GitHub release once per client session, in the background. If a newer version exists, a notification appears a few seconds after you join SkyBlock, like the first-install welcome. It does not download or install updates.
+ZPBW checks this repository's latest stable GitHub release once per client session, in the background. If a newer version contains the complete pair of exact native install artifacts, a notification appears a few seconds after you join SkyBlock, like the first-install welcome. It does not download or install updates.
 
 No release, an inaccessible repository or a failed request simply means no update notification. Pre-releases are not offered by this checker.
 
@@ -53,10 +63,12 @@ Diagnostics are kept in a bounded in-memory buffer for the current launch; ZPBW 
 With Java 25 installed:
 
 ```sh
-./gradlew test build
+python tools/verify_dual_native.py
 ```
 
-On Windows, use `gradlew.bat test build`. The standalone mod is written to `build/libs/zpbw-1.0.2.jar`.
+This tree builds 1.0.3 independently for released Java 26.2 and 26.3 using Java 25. The command cleans, tests, builds and validates both native roots, then collects a matching immutable pair under `artifacts/native-pairs/<run-id>/`. Install only the JAR matching your exact Minecraft version: `zpbw-mc26.2-1.0.3.jar` or `zpbw-mc26.3-1.0.3.jar`. A collected build is **BUILT_UNQUALIFIED**, not runtime-qualified or released. See [native build and validation](docs/dual-native-1.0.3.md).
+
+See [validation and known limitations](docs/validation-1.0.3.md) for the release checks. Compilation alone is not functional verification.
 
 # How it works, and why.
 
@@ -112,7 +124,7 @@ A new warp can be predicted from the previous predicted landing position, allowi
 
 Intermediate movement that the server could not have received yet is not blindly replayed between those warps. Blinkwarp keeps the packet stream ordered around the actual etherwarp uses and only releases movement and actions when their corresponding server state has caught up.
 
-Up to **five unconfirmed warps** can overlap. This limit is fixed. Each genuine confirmation frees a slot for another warp, so continued chaining does not wait for the entire chain to drain. When all five slots are occupied, up to five additional warp clicks can wait in order; at most one queued click is dispatched per native input tick. Queued clicks are rechecked before dispatch and cancelled when their context is no longer valid.
+Up to **five unconfirmed warps** can overlap by default. In 1.0.3, `/zpbw chainmax [value]` queries or sets this ceiling from one to five. Each genuine confirmation frees a slot for another warp, so continued chaining does not wait for the entire chain to drain. When the configured slots are occupied, additional warp clicks can wait in order; at most one queued click is dispatched per native input tick. Lowering the ceiling preserves already-issued warps and captured waiting clicks. Queued clicks keep their original deadlines and are rechecked before dispatch.
 
 # Prediction failures and recovery
 
@@ -124,13 +136,19 @@ If the server sends a different destination, the prediction expires, the connect
 
 Dependent queued actions which have not executed yet are cancelled rather than being fired from a position which is no longer valid.
 
-When an overlapping chain fails, already-sent uses can still have genuine teleports in flight. Blinkwarp briefly pauses body movement and dependent actions while those responses drain, with a separate bound of 20 nonzero server Ping packets. Native input sampling continues. Recovery resumes from the latest authoritative state after a fresh native input sample and its normal TickEnd; it does not create replacement gameplay packets or extra ticks. This pause applies to recovery, rather than successful chaining.
+On an actual issued-warp timeout, ZPBW abandons obsolete speculative actions and returns fresh input and physics to the native path. It retains bounded bookkeeping for uncertain issued effects; genuine late responses still use Minecraft's original handlers. Successful warps keep their existing ordering.
+
+After uncertain recovery, new predictions pause while ordinary native gameplay continues. They resume automatically on the same connection after a genuine server position has completed its original native response handling, fresh native input has been sampled, and a normal TickEnd confirms that outstanding work has drained. A minimum of 20 completed native client ticks stabilizes this error-only transition; another native use during recovery restarts that quiet window, so continued clicking cannot reuse the first failure's expired timer. The timer alone cannot resume prediction. Queued incoming positions, new untracked uses, interrupted handlers and ownership/lifecycle changes prevent stale authority from reopening admission. If a refused warp never produces a server position, prediction waits for a later genuine server position; reconnecting is not required. Feature toggles cannot discard unfinished ownership or force this gate open.
+
+An obsolete queued mining continuation ends quietly when the held button/target no longer supports it. It does not discard later independent clicks. Distinct pressed clicks, changed held items and invalid player/world contexts retain their normal validation and cancellation messages.
 
 A server knockback or explosion impulse during a pending prediction also invalidates that prediction. The original native motion handler still runs. A later genuine teleport can supersede the impulse; if no teleport arrives, recovery preserves the received impulse when movement resumes.
 
 Already-sent etherwarp uses obviously cannot be taken back, but Blinkwarp will not manufacture another successful teleport on top of a failed prediction.
 
 **the client predicts, but the server still gets the final say.**
+
+The focused 26.3 local test also found a specific turn-and-place compatibility restriction: the installed server check can deny an ordinary block placement when it evaluates the previous look before the following native movement update. The retained trace shows correct native click/look order and the check's timing-dependent cancellation. Preparing the camera one natural tick earlier completed the tested workload, but this was a private test variant, not a production repair or a guarantee for instantaneous turn-and-place behavior on every server. See [the validation limits](docs/validation-1.0.3.md).
 
 # What this does not remove
 

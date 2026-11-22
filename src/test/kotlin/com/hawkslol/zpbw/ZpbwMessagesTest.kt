@@ -9,6 +9,18 @@ import kotlin.test.*
 
 class ZpbwMessagesTest {
     private fun flattened(c: Component): List<Component> = listOf(c) + c.siblings.flatMap(::flattened)
+    @Test fun suspendedPredictionHasAnExplicitPrefixedRecoveryInstruction() {
+        val message = ZpbwMessages.recoverySuspended()
+        assertEquals("[ZPBW] Blinkwarp recovering. Predictions resume automatically after server synchronization.", message.string)
+        val colors = flattened(message).mapNotNull { it.style.color }
+        assertContains(colors, TextColor.fromLegacyFormat(ChatFormatting.BLUE))
+        assertContains(colors, TextColor.fromLegacyFormat(ChatFormatting.RED))
+        assertContains(colors, TextColor.fromLegacyFormat(ChatFormatting.WHITE))
+    }
+    @Test fun clipboardFailureKeepsTheOriginalTextAndExplainsTheConsoleFallback() {
+        assertEquals("[ZPBW] Could not copy ZPBW logs. Check clipboard access and try again. Pasted logs to console instead.",
+            ZpbwMessages.clipboardFallback().string)
+    }
     @Test fun prefixAndTogglesUseBlueGrayWhite() {
         val message=ZpbwMessages.selection("Enabled Zero Ping Blinkwarp.")
         assertEquals("[ZPBW] Enabled Zero Ping Blinkwarp.",message.string)
@@ -46,10 +58,24 @@ class ZpbwMessagesTest {
         assertContains(motion.string,"Server motion changed."); assertFalse(motion.string.contains("prediction failed"))
     }
     @Test fun queueTimeoutWaitingAndCopyMessagesMatchPublicWording() {
-        assertEquals("[ZPBW] Waiting for server! (3/5)",ZpbwMessages.waiting(3).string)
+        assertEquals("[ZPBW] Waiting for server! (3/5)",ZpbwMessages.waiting(3, 5).string)
+        assertEquals("[ZPBW] Waiting for server! (5/1)",ZpbwMessages.waiting(5, 1).string)
         assertEquals("[ZPBW] Blinkwarp failed: No teleport arrived within 20 ticks.",ZpbwMessages.timeout(20).string)
         assertEquals("[ZPBW] Copied ZPBW logs to clipboard. You can now share it with a developer.",ZpbwMessages.copiedLogs().string)
         assertEquals(TextColor.fromLegacyFormat(ChatFormatting.GREEN),ZpbwMessages.copiedLogs().siblings.last().style.color)
+    }
+    @Test fun cancelledQueuedActionsDoNotClaimAnIssuedBlinkwarpFailed() {
+        val message=ZpbwMessages.queuedCancellation("The target or player state changed.","queued_click_context_changed")
+        assertEquals("[ZPBW] Queued action cancelled: The target or player state changed.",message.string)
+        assertFalse(message.string.contains("Blinkwarp failed"))
+        assertFalse(message.string.contains("queued_click_context_changed"))
+        val pieces=flattened(message)
+        assertEquals(TextColor.fromLegacyFormat(ChatFormatting.GRAY),pieces.first { it.string=="Queued action cancelled: " }.style.color)
+        assertEquals(TextColor.fromLegacyFormat(ChatFormatting.WHITE),pieces.first { it.string=="The target or player state changed." }.style.color)
+        val hover=pieces.mapNotNull { it.style.hoverEvent as? HoverEvent.ShowText }.first()
+        assertEquals("Reason: queued_click_context_changed",hover.value().string)
+        assertEquals("[ZPBW] Queued action cancelled: A screen was opened.",ZpbwMessages.queuedCancellation("A screen was opened.").string)
+        assertEquals("[ZPBW] Blinkwarp failed: No teleport arrived within 20 ticks.",ZpbwMessages.timeout(20).string)
     }
     @Test fun welcomeHasVersionAndClickableUnderlinedProjectLink() {
         val c=ZpbwMessages.welcome("1.0.0")

@@ -6,10 +6,9 @@ import kotlin.test.*
 
 class PublicBoundaryTest {
     @Test fun predictionAndSneakUseSessionSafetyRatherThanHostnameAdmission() {
-        val directory = Path.of("src/main/kotlin/com/hawkslol/zpbw")
-        assertFalse(Files.exists(directory.resolve("ZpbwPolicy.kt")))
-        val runtime = Files.readString(directory.resolve("ZpbwRuntime.kt"))
-        val sneak = Files.readString(directory.resolve("NoSneakDelay.kt"))
+        assertFalse(EffectiveSources.productionFiles().any { it.fileName.toString() == "ZpbwPolicy.kt" })
+        val runtime = Files.readString(EffectiveSources.path("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt"))
+        val sneak = Files.readString(EffectiveSources.path("src/main/kotlin/com/hawkslol/zpbw/NoSneakDelay.kt"))
         for (source in listOf(runtime, sneak)) {
             assertFalse(source.contains("ZpbwPolicy"))
             assertFalse(source.contains("currentServer"))

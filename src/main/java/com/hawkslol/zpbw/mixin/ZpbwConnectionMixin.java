@@ -1,6 +1,9 @@
 package com.hawkslol.zpbw.mixin;
 
 import com.hawkslol.zpbw.ZpbwRuntime;
+import com.hawkslol.zpbw.NativeDispatchScopes;
+import com.hawkslol.zpbw.NativeRotationResponseScope;
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import io.netty.channel.ChannelFutureListener;
@@ -14,6 +17,16 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(Connection.class)
 public abstract class ZpbwConnectionMixin {
+    @WrapMethod(method = "send(Lnet/minecraft/network/protocol/Packet;)V")
+    private void zpbw$sendOccurrence(Packet<?> packet, Operation<Void> original) {
+        NativeDispatchScopes.Send scope = NativeDispatchScopes.beginSend(this, packet);
+        NativeRotationResponseScope.Send rotation = NativeRotationResponseScope.beginSend(this, packet);
+        try { original.call(packet); }
+        finally {
+            try { NativeRotationResponseScope.endSend(rotation); }
+            finally { NativeDispatchScopes.endSend(scope); }
+        }
+    }
     // Runs once on receipt, before vanilla schedules packet handling on the client thread.
     @Inject(method = "channelRead0(Lio/netty/channel/ChannelHandlerContext;Lnet/minecraft/network/protocol/Packet;)V",
         at = @At(value = "INVOKE", target = "Lnet/minecraft/network/Connection;genericsFtw(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;)V"))
@@ -32,6 +45,7 @@ public abstract class ZpbwConnectionMixin {
     @WrapOperation(method = "send(Lnet/minecraft/network/protocol/Packet;)V", at = @At(value = "INVOKE",
         target = "Lnet/minecraft/network/Connection;send(Lnet/minecraft/network/protocol/Packet;Lio/netty/channel/ChannelFutureListener;)V"))
     private void zpbwCandidate$sourceCut(Connection connection, Packet<?> packet, ChannelFutureListener listener, Operation<Void> original) {
+        ZpbwRuntime.beforeSendDelegate(connection, packet);
         original.call(connection, packet, listener);
         ZpbwRuntime.afterSend(connection, packet); // Cancelled HEAD never reaches this delegate.
     }

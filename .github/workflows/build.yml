@@ -28,4 +28,6 @@ jobs:
           cache: gradle
       - name: Verify and build
         shell: bash
-        run: ./gradlew test build --no-daemon --console=plain
+        run: |
+          python -m unittest discover -s tools -p test_dual_native.py
+          python tools/verify_dual_native.py

@@ -8,7 +8,7 @@ import kotlin.test.*
 
 /** Packaging and hook-wiring checks supplement the executable ownership tests; not live co-load proof. */
 class ExternalLeaseContractTest {
-    private val root = Path(System.getProperty("user.dir"))
+    private val root = EffectiveSources
     private val runtime get() = root.resolve("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt").readText().replace("\r\n", "\n")
     @Test fun javaStaticReflectionContractNeedsNoKotlinInstance() {
         val type = ExternalPredictionLease::class.java

@@ -14,9 +14,9 @@ class NsdNativeContractTest {
             assertNotNull(it, name); ClassReader(it).accept(node, 0)
         }
     }
-    private val nsd get() = Files.readString(Path.of("src/main/kotlin/com/hawkslol/zpbw/NoSneakDelay.kt"))
+    private val nsd get() = Files.readString(EffectiveSources.path("src/main/kotlin/com/hawkslol/zpbw/NoSneakDelay.kt"))
 
-    @Test fun real262OrderIsClickThenSamplePhysicsThenNativeInputMovementAndTickEnd() {
+    @Test fun nativeOrderIsClickThenSamplePhysicsThenNativeInputMovementAndTickEnd() {
         val minecraft = node("net/minecraft/client/Minecraft")
         val tick = minecraft.methods.single { it.name == "tick" && it.desc == "()V" }.instructions.toArray()
         val keys = tick.indexOfFirst { it is MethodInsnNode && it.name == "handleKeybinds" }
@@ -26,11 +26,20 @@ class NsdNativeContractTest {
         val player = node("net/minecraft/client/player/LocalPlayer")
         val localTick = player.methods.single { it.name == "tick" && it.desc == "()V" }.instructions.toArray()
         val physics = localTick.indexOfFirst { it is MethodInsnNode && it.name == "tick" && it.owner == player.superName }
-        val input = localTick.indexOfFirst { it is TypeInsnNode && it.desc.endsWith("ServerboundPlayerInputPacket") }
-        val nativeSend = localTick.indexOfFirst { it is MethodInsnNode && it.name == "send" }
-        val cache = localTick.indexOfFirst { it is FieldInsnNode && it.opcode == Opcodes.PUTFIELD && it.name == "lastSentInput" }
-        val position = localTick.indexOfFirst { it is MethodInsnNode && it.name == "sendPosition" }
-        assertTrue(physics >= 0 && input > physics && nativeSend > input && cache > nativeSend && position > cache)
+        assertTrue(physics >= 0)
+        val sending = if (EffectiveSources.nativeTarget == "26.2") localTick
+            else player.methods.single { it.name == "sendChanges" && it.desc == "()V" }.instructions.toArray()
+        if (EffectiveSources.nativeTarget == "26.3") {
+            val sendChanges = tick.indexOfFirst { it is MethodInsnNode && it.name == "sendChanges" }
+            assertTrue(sendChanges > entities && sendChanges < tickEnd)
+            assertFalse(localTick.any { it is MethodInsnNode && it.name == "sendPosition" })
+        }
+        val input = sending.indexOfFirst { it is TypeInsnNode && it.desc.endsWith("ServerboundPlayerInputPacket") }
+        val nativeSend = sending.indexOfFirst { it is MethodInsnNode && it.name == "send" }
+        val cache = sending.indexOfFirst { it is FieldInsnNode && it.opcode == Opcodes.PUTFIELD && it.name == "lastSentInput" }
+        val position = sending.indexOfFirst { it is MethodInsnNode && it.name == "sendPosition" }
+        assertTrue(input >= 0 && nativeSend > input && cache > nativeSend && position > cache)
+        if (EffectiveSources.nativeTarget == "26.2") assertTrue(input > physics)
         val sample = player.methods.single { it.name == "aiStep" }.instructions.toArray()
         val oldShift = sample.indexOfFirst { it is MethodInsnNode && it.name == "isShiftKeyDown" }
         val currentKeys = sample.indexOfFirst { it is MethodInsnNode && it.owner.endsWith("/ClientInput") && it.name == "tick" }
@@ -51,10 +60,10 @@ class NsdNativeContractTest {
         }
         assertFalse(nsd.contains("commitDeferred"))
         assertFalse(nsd.contains("latch.deferred"))
-        val hooks = Files.readString(Path.of("src/main/java/com/hawkslol/zpbw/mixin/ZpbwSneakMixin.java"))
+        val hooks = Files.readString(EffectiveSources.path("src/main/java/com/hawkslol/zpbw/mixin/ZpbwSneakMixin.java"))
         assertContains(hooks, "@Inject(method=\"runTick\", at=@At(\"HEAD\"))")
         assertContains(hooks, "@Inject(method=\"tick\",at=@At(\"TAIL\"))")
-        val sample = Files.readString(Path.of("src/main/java/com/hawkslol/zpbw/mixin/ZpbwLatchedInputMixin.java"))
+        val sample = Files.readString(EffectiveSources.path("src/main/java/com/hawkslol/zpbw/mixin/ZpbwLatchedInputMixin.java"))
         assertContains(sample, "@Inject(method=\"tick\",at=@At(\"TAIL\"),order=2000)")
     }
 
@@ -70,7 +79,7 @@ class NsdNativeContractTest {
         assertContains(nsd, "ZpbwRuntime.deferredUseInput() ?: latch.value")
         assertFalse(nsd.contains("glfw"))
         assertFalse(nsd.contains("keyPresses = early"))
-        val runtime = Files.readString(Path.of("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt"))
+        val runtime = Files.readString(EffectiveSources.path("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt"))
         assertContains(runtime, "inputCommitted = NoSneakDelay.hasCommitment()")
         assertContains(runtime.substringAfter("fun reset()"), "NoSneakDelay.reset()")
         val recovery = runtime.substringAfter("private fun recover(").substringBefore("private fun refreshRecoveryPick(")

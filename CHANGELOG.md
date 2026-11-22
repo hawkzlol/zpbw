@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.0.3 - 2026-11-22
+
+### Minecraft versions
+
+- Support Minecraft 26.2 and 26.3 with separate native JARs from one shared codebase.
+- Preserve each version's native teleport responses, input dispatch and interaction behavior.
+- Update notifications select the correct Minecraft artifact and require a complete native release pair.
+
+### Prediction and input
+
+- Add `/zpbw chainmax [value]`, clamped to 1–5 (default 5). Saving a new limit preserves pending warps and their deadlines.
+- Preserve native position reminders during chaining and the separate server-driven rotation response.
+- Improve grazing-edge ray accuracy using double-precision direction math; add bounded mismatch diagnostics.
+- Keep NSD's required early-input commitment while sampling current keys afterwards, without stale input replay.
+
+### Recovery and usability
+
+- Recover automatically on the same connection after genuine authority and fresh input settle; no reconnect is required.
+- On failure, discard obsolete speculative actions and resume fresh native gameplay. Keep late genuine teleport handling intact.
+- Restart recovery stabilization after each native use. Give issued warps a natural-client-tick minimum grace alongside server Ping counting.
+- Quietly drop obsolete queued mining continuations without clearing later independent clicks; clarify cancellation messages.
+- Fix disconnect cleanup ownership, clipboard newline handling and console fallback when copying logs fails.
+
+### Known limitations
+
+- An intermittent falling 1.414-block prediction discrepancy remains under investigation. Run `/zpbw logs` immediately after a failure.
+- Local simulation checks do not establish every remote server's behavior. See [validation notes](docs/validation-1.0.3.md).
+
 ## 1.0.2 - 2026-11-17
 
 ### NoSneakDelay
@@ -24,7 +52,7 @@
 - Failure recovery can briefly pause movement and dependent actions for up to a separate 20 nonzero server Ping packets. Successful chaining is unchanged by that barrier.
 - No extra gameplay packets, simulation ticks or TickEnd packets are introduced by these recovery fixes. No anti-cheat checks or production focus/GUI protections are weakened.
 
-## 1.0.1 — 2026-10-07
+## 1.0.1 â€” 2026-10-07
 
 ### Fixes
 
@@ -49,11 +77,11 @@
 
 ### Verification and remaining limits
 
-- 202 automated mod tests pass. Gameplay fixes were exercised in the owned Grim lab at 25–300 ms latency, including mining, interactions, recovery, jumps and Jump Boost V.
+- 202 automated mod tests pass. Gameplay fixes were exercised in the owned Grim lab at 25â€“300 ms latency, including mining, interactions, recovery, jumps and Jump Boost V.
 - The new detector passed automated checks and mapping verification; a minimal-client/live SkyBlock runtime check has not been completed.
 - Five-warp chaining still pauses new dispatch after the first confirmation until the remaining chain settles. Timeout still counts nonzero server Ping packets; bursts can exhaust its budget. General airborne prediction mismatches remain under investigation.
 
-## 1.0.0 — 2026-10-06
+## 1.0.0 â€” 2026-10-06
 
 - Initial public release of Zero Ping Blinkwarp for Minecraft 26.2.
 - Local landing prediction with ordered packet holding, genuine teleport confirmation, and up to five overlapping warps.

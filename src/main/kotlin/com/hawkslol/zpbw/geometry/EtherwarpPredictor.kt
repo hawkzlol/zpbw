@@ -11,8 +11,10 @@ data class EtherwarpRotationPrediction(
     val succeeded: Boolean,
     val target: BlockPos?,
     val landingFeetPosition: Vec3?,
-    val diagnostics: List<String>
+    val diagnostics: List<String>,
+    val trace: EtherwarpTrace? = null
 )
+data class EtherwarpTrace(val ray: EtherwarpRaycast.Snapshot, val eyeHeight: Double)
 
 /** Item/source selection remains separate from the testable block ray. Remote parity is unproved. */
 object EtherwarpPredictor {
@@ -24,7 +26,8 @@ object EtherwarpPredictor {
         sourceOverride: Vec3? = null,
         requireArmed: Boolean = true,
         countSkips: Boolean = true,
-        sneakingOverride: Boolean? = null
+        sneakingOverride: Boolean? = null,
+        captureTrace: Boolean = false
     ): EtherwarpRotationPrediction? {
         val player = mc.player ?: return null
         val heldData = heldItemData(player.mainHandItem)
@@ -38,13 +41,30 @@ object EtherwarpPredictor {
         val eyePose = if (sneaking || player.isCrouching) Pose.CROUCHING else player.pose
         val eyeHeight = player.getDimensions(eyePose).eyeHeight().toDouble()
         val start = position.add(0.0, eyeHeight, 0.0)
-        val look = Vec3.directionFromRotation(pitch, yaw)
+        val look = EtherwarpRaycast.direction(yaw, pitch)
         val level = mc.level ?: return null
         val hit = EtherwarpRaycast(level) { x, z -> if (level.hasChunk(x, z)) level.getChunk(x, z) else null }
-            .trace(start, start.add(look.scale(range)))
+            .trace(start, start.add(look.scale(range)), captureTrace)
         val landing = if (hit.succeeded) hit.pos?.let { Vec3(it.x + 0.5, hit.landingFeetY!!.toDouble(), it.z + 0.5) } else null
-        val input = "origin=$position anchorOverride=${sourceOverride != null} eye=$eyeHeight eyePose=$eyePose playerPose=${player.pose} crouching=${player.isCrouching} shift=${player.isShiftKeyDown} keyShift=${mc.options.keyShift.isDown} effectiveSneak=$sneaking override=$sneakingOverride yaw=$yaw pitch=$pitch range=$range"
-        return EtherwarpRotationPrediction(hit.succeeded, hit.pos, landing, listOf(input) + hit.details)
+        val input = "origin=$position anchorOverride=${sourceOverride != null} eye=$eyeHeight bodyEye=${player.eyeHeight} eyePose=$eyePose playerPose=${player.pose} crouching=${player.isCrouching} shift=${player.isShiftKeyDown} keyShift=${mc.options.keyShift.isDown} effectiveSneak=$sneaking override=$sneakingOverride yaw=$yaw pitch=$pitch range=$range direction=double"
+        return EtherwarpRotationPrediction(hit.succeeded, hit.pos, landing, listOf(input) + hit.details,
+            hit.snapshot?.let { EtherwarpTrace(it, eyeHeight) })
+    }
+
+    /** Failure-only evidence, never an alternative admission/confirmation rule. */
+    fun audit(trace: EtherwarpTrace, actual: Vec3): List<String> {
+        val level = mc.level ?: return listOf("unavailable=world_missing")
+        val ray = EtherwarpRaycast(level) { x,z -> if (level.hasChunk(x,z)) level.getChunk(x,z) else null }
+        val changed = ray.changedCells(trace.ray)
+        fun resultAt(height: Double): String {
+            val delta = height - trace.eyeHeight
+            val result = ray.trace(trace.ray.start.add(0.0,delta,0.0), trace.ray.end.add(0.0,delta,0.0))
+            val feet = result.pos?.takeIf { result.succeeded }?.let { Vec3(it.x+.5,result.landingFeetY!!+.05,it.z+.5) }
+            return "$height:${feet ?: result.reason}:matches=${feet?.distanceToSqr(actual)?.let { it<=1e-12 } == true}"
+        }
+        return listOf("start=${trace.ray.start} end=${trace.ray.end} eye=${trace.eyeHeight} changed=${changed.size} sampled=${trace.ray.cells.size}",
+            "eyeHypotheses=${listOf(trace.eyeHeight,1.54,1.62).distinct().joinToString(";", transform=::resultAt)} diagnosticOnly=true") +
+            changed.take(8).map { (old,now) -> "cell=${old.pos} before=${old.stateId} now=${now ?: "unloaded"}" }
     }
 
     private data class HeldData(val id: String?, val hasEthermerge: Boolean, val tunedTransmission: Int)

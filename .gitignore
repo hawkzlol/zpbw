@@ -1,6 +1,8 @@
 /.gradle/
 /.gradle-user-home/
 /build/
+/versions/*/build/
+/versions/*/.gradle/
 /out/
 /run/
 /logs/
@@ -14,3 +16,13 @@
 local.properties
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
+
+# Local exact-build receipts include machine-specific dependency paths.
+/artifacts/
+
+# Python bytecode and local-only development material.
+__pycache__/
+*.py[cod]
+/evidence/
+/private-fixtures/
+/DB_Commands_ran.txt

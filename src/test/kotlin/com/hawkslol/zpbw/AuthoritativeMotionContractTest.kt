@@ -38,7 +38,7 @@ class AuthoritativeMotionContractTest {
         }
     }
     @Test fun authoritativeImpulseReplacesOnlyItsOwnLiveRecoveryAuthority() {
-        val runtime=Files.readString(Path.of("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt"))
+        val runtime=Files.readString(EffectiveSources.path("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt"))
         val begin=runtime.substringAfter("fun beforeAuthoritativeMotion(").substringBefore("fun afterAuthoritativeMotion(")
         assertContains(begin,"entity !== mc.player")
         assertContains(begin,"entries.all { it.cut && it.value.use != null }")

@@ -1,0 +1,142 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.security.MessageDigest
+
+def productRoot = file('../..').canonicalFile
+def target = project.ext.zpbwNativeTarget.toString()
+def definitions = new JsonSlurper().parse(new File(productRoot, 'native-targets.json'))
+def lane = definitions.targets[target]
+if (lane == null || projectDir.canonicalFile != new File(productRoot, lane.projectRoot).canonicalFile) {
+    throw new GradleException('Unknown or incorrectly rooted ZPBW native target')
+}
+version = definitions.productVersion
+group = 'com.hawkslol.zpbw'
+base { archivesName = "zpbw-mc${target}" }
+repositories { mavenCentral() }
+dependencies {
+    minecraft "com.mojang:minecraft:${target}"
+    implementation "net.fabricmc:fabric-loader:${lane.loader}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${lane.fabricApi}"
+    implementation "net.fabricmc:fabric-language-kotlin:${definitions.fabricLanguageKotlin}"
+    testImplementation 'org.jetbrains.kotlin:kotlin-test'
+}
+dependencyLocking { lockAllConfigurations(); lockMode = LockMode.STRICT }
+
+def shared = new File(productRoot, 'src/main').canonicalFile
+def nativeRoot = new File(productRoot, lane.sourceRoot).canonicalFile
+def replaced = { details ->
+    def path = details.file.canonicalFile.toPath()
+    path.startsWith(shared.toPath()) && new File(nativeRoot, shared.toPath().relativize(path).toString()).isFile()
+}
+lane.requiredNativeFiles.each { rel ->
+    if (!new File(nativeRoot, rel).isFile()) throw new GradleException('Missing required native source: ' + rel)
+}
+sourceSets {
+    main {
+        java.setSrcDirs([new File(shared, 'java'), new File(nativeRoot, 'java')])
+        java.exclude replaced
+        resources.setSrcDirs([new File(shared, 'resources'), new File(nativeRoot, 'resources')])
+        resources.exclude replaced
+    }
+    test {
+        java.setSrcDirs([new File(productRoot, 'src/test/java'), new File(productRoot, lane.testRoot + '/java')])
+        resources.setSrcDirs([new File(productRoot, 'src/test/resources'), new File(productRoot, lane.testRoot + '/resources')])
+    }
+}
+kotlin.sourceSets.main.kotlin.setSrcDirs([new File(shared, 'kotlin'), new File(shared, 'java'),
+    new File(nativeRoot, 'kotlin'), new File(nativeRoot, 'java')])
+kotlin.sourceSets.main.kotlin.exclude replaced
+kotlin.sourceSets.test.kotlin.setSrcDirs([new File(productRoot, 'src/test/kotlin'), new File(productRoot, 'src/test/java'),
+    new File(productRoot, lane.testRoot + '/kotlin'), new File(productRoot, lane.testRoot + '/java')])
+loom { mods { zpbw { sourceSet sourceSets.main } } }
+kotlin { jvmToolchain(25) }
+java { withSourcesJar() }
+tasks.withType(JavaCompile).configureEach { options.release = 25 }
+// Kotlin derives JVM25 from its explicit toolchain; keep the applied script free
+// of plugin-classloader type references. Artifact validation also checks bytecode.
+tasks.named('compileKotlin') {
+    compilerOptions.moduleName.set('zpbw')
+}
+processResources {
+    inputs.properties(version: project.version, minecraft_version: target, loader_version: lane.loader,
+        fabric_api_version: lane.fabricApi, fabric_kotlin_version: definitions.fabricLanguageKotlin)
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    filesMatching('fabric.mod.json') {
+        expand(version: project.version, minecraft_version: target, loader_version: lane.loader,
+            fabric_api_version: lane.fabricApi, fabric_kotlin_version: definitions.fabricLanguageKotlin)
+    }
+}
+tasks.withType(Jar).configureEach {
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+jar { from(new File(productRoot, 'LICENSE')) }
+
+def sha = { File f -> MessageDigest.getInstance('SHA-256').digest(f.bytes).encodeHex().toString() }
+def effectiveReport = layout.buildDirectory.file('reports/native/effective-sources.json')
+tasks.register('effectiveSources') {
+    inputs.property('buildRunId', providers.gradleProperty('zpbwBuildRunId').orElse('manual-unqualified'))
+    inputs.files(sourceSets.main.allSource, sourceSets.test.allSource)
+    outputs.file(effectiveReport)
+    doLast {
+        def selections = [:]
+        sourceSets.main.allSource.files.findAll { it.isFile() }.sort { it.path }.each { input ->
+            def canonical = input.canonicalFile
+            def owner = canonical.toPath().startsWith(nativeRoot.toPath()) ? nativeRoot : shared
+            def logical = owner.toPath().relativize(canonical.toPath()).toString().replace('\\', '/')
+            if (selections.containsKey(logical)) throw new GradleException('Duplicate source/resource: ' + logical)
+            selections[logical] = [path: canonical.path, sha256: sha(canonical), owner: owner == shared ? 'shared' : target]
+        }
+        def classpaths = [:]
+        ['compileClasspath', 'runtimeClasspath', 'testCompileClasspath', 'testRuntimeClasspath'].each { name ->
+            classpaths[name] = configurations.getByName(name).files.findAll { it.isFile() }.sort { it.path }.collect {
+                [path: it.canonicalPath, sha256: sha(it)]
+            }
+        }
+        def forbidden = new File(productRoot, target == '26.2' ? 'versions/mc26_3/build' : 'versions/mc26_2/build').canonicalPath
+        classpaths.values().flatten().each { item ->
+            if (item.path.startsWith(forbidden)) throw new GradleException('Opposite-lane output in native classpath')
+        }
+        def nativeOwners = [:]
+        ['net/minecraft/client/Minecraft.class', 'net/minecraft/client/player/LocalPlayer.class',
+         'net/minecraft/client/multiplayer/ClientPacketListener.class', 'net/minecraft/network/Connection.class',
+         'com/mojang/blaze3d/platform/InputConstants.class'].each { entry ->
+            def owners = []
+            classpaths.compileClasspath.findAll { it.path.endsWith('.jar') }.each { item ->
+                new java.util.zip.ZipFile(item.path).withCloseable { zip ->
+                    if (zip.getEntry(entry) != null) {
+                        def info = zip.getEntry('version.json')
+                        if (info == null || new JsonSlurper().parse(zip.getInputStream(info)).id != target)
+                            throw new GradleException('Wrong native game identity: ' + item.path)
+                        owners << item
+                    }
+                }
+            }
+            if (owners.size() != 1) throw new GradleException('Expected one native class owner: ' + entry)
+            nativeOwners[entry] = owners[0]
+        }
+        def modules = [:]
+        ['compileClasspath', 'runtimeClasspath', 'testCompileClasspath', 'testRuntimeClasspath'].each { name ->
+            modules[name] = configurations.getByName(name).resolvedConfiguration.resolvedArtifacts.collect {
+                [module: it.moduleVersion.id.toString(), file: it.file.canonicalPath, sha256: sha(it.file)]
+            }.sort { it.module }
+        }
+        def out = effectiveReport.get().asFile
+        out.parentFile.mkdirs()
+        out.text = JsonOutput.prettyPrint(JsonOutput.toJson([target: target, version: project.version.toString(),
+            buildRunId: providers.gradleProperty('zpbwBuildRunId').getOrElse('manual-unqualified'),
+            productRoot: productRoot.path, sources: selections, classpaths: classpaths, nativeOwners: nativeOwners,
+            modules: modules, java: System.getProperty('java.runtime.version')]))
+    }
+}
+test {
+    dependsOn tasks.named('effectiveSources')
+    workingDir productRoot
+    systemProperty 'zpbw.effectiveSources', effectiveReport.get().asFile.path
+    systemProperty 'zpbw.nativeTarget', target
+    systemProperty 'zpbw.productRoot', productRoot.path
+    useJUnitPlatform()
+    maxHeapSize = '1G'
+    inputs.files(sourceSets.main.allSource)
+}

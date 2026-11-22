@@ -2,6 +2,7 @@ package com.hawkslol.zpbw.mixin;
 
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.hawkslol.zpbw.ZpbwRuntime;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.Connection;
@@ -35,8 +36,14 @@ public abstract class ZpbwTeleportMixin {
         original.call(connection, response);
         ZpbwRuntime.nativeResponse(connection, response, genuine);
     }
-    @Inject(method = "handleMovePlayer", at = @At("RETURN"))
-    private void zpbwCandidate$after(ClientboundPlayerPositionPacket packet, CallbackInfo ci) {
-        ZpbwRuntime.afterGenuine(getConnection(), packet);
+    @WrapMethod(method = "handleMovePlayer")
+    private void zpbw$genuineScope(ClientboundPlayerPositionPacket packet, Operation<Void> original) {
+        boolean complete = false;
+        try { original.call(packet); complete = true; }
+        finally {
+            ZpbwRuntime.nativePositionHandled(getConnection(), packet);
+            if (complete) ZpbwRuntime.afterGenuine(getConnection(), packet);
+            else ZpbwRuntime.abortedGenuine(getConnection(), packet);
+        }
     }
 }

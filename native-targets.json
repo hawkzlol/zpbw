@@ -1,0 +1,46 @@
+{
+  "productVersion": "1.0.3",
+  "modId": "zpbw",
+  "java": 25,
+  "kotlin": "2.4.10",
+  "loom": "1.17.11",
+  "gradle": "9.6.0",
+  "fabricLanguageKotlin": "1.13.13+kotlin.2.4.10",
+  "targets": {
+    "26.2": {
+      "projectRoot": "versions/mc26_2",
+      "sourceRoot": "src/native26_2",
+      "testRoot": "src/native26_2Test",
+      "loader": "0.19.3",
+      "fabricApi": "0.155.2+26.2",
+      "requiredNativeFiles": [
+        "kotlin/com/hawkslol/zpbw/nativebridge/NativeIdentity.kt",
+        "kotlin/com/hawkslol/zpbw/nativebridge/NativeTeleportContract.kt",
+        "kotlin/com/hawkslol/zpbw/nativebridge/NativePacketSemantics.kt",
+        "kotlin/com/hawkslol/zpbw/nativebridge/NativeGameAccess.kt"
+      ],
+      "replacements": []
+    },
+    "26.3": {
+      "projectRoot": "versions/mc26_3",
+      "sourceRoot": "src/native26_3",
+      "testRoot": "src/native26_3Test",
+      "loader": "0.19.5",
+      "fabricApi": "0.165.0+26.3",
+      "requiredNativeFiles": [
+        "kotlin/com/hawkslol/zpbw/nativebridge/NativeIdentity.kt",
+        "kotlin/com/hawkslol/zpbw/nativebridge/NativeTeleportContract.kt",
+        "kotlin/com/hawkslol/zpbw/nativebridge/NativePacketSemantics.kt",
+        "kotlin/com/hawkslol/zpbw/nativebridge/NativeGameAccess.kt",
+        "java/com/hawkslol/zpbw/mixin/ZpbwSneakSampleMixin.java",
+        "java/com/hawkslol/zpbw/mixin/ZpbwSourceTickMixin.java",
+        "java/com/hawkslol/zpbw/mixin/ZpbwTeleportMixin.java"
+      ],
+      "replacements": [
+        "java/com/hawkslol/zpbw/mixin/ZpbwSneakSampleMixin.java",
+        "java/com/hawkslol/zpbw/mixin/ZpbwSourceTickMixin.java",
+        "java/com/hawkslol/zpbw/mixin/ZpbwTeleportMixin.java"
+      ]
+    }
+  }
+}

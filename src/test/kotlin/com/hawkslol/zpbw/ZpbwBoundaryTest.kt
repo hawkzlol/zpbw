@@ -7,7 +7,7 @@ import kotlin.test.*
 
 /** Source/packaging contracts, not Minecraft runtime or server acceptance tests. */
 class ZpbwBoundaryTest {
-    private val root = Path(System.getProperty("user.dir"))
+    private val root = EffectiveSources
     private val runtime get() = root.resolve("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt").readText()
     @Test fun skyblockDetectionUsesOnlyNativeServerSignals() {
         val detector = root.resolve("src/main/kotlin/com/hawkslol/zpbw/SkyblockDetector.kt").readText()
@@ -39,7 +39,7 @@ class ZpbwBoundaryTest {
         assertFalse(runtime.contains("calibrated < 3"))
         val client = root.resolve("src/main/kotlin/com/hawkslol/zpbw/ZpbwClient.kt").readText()
         assertContains(client, "lit(\"zpbw\")")
-        assertFalse(client.contains("lit(\"chainmax\")"))
+        assertContains(client, "lit(\"chainmax\")")
         assertContains(client, "ZpbwRuntime.joined()")
         assertContains(runtime, "ZpbwLog()")
         assertFalse(runtime.contains("gameDir.resolve(\"logs/zpbw\")"))
@@ -51,7 +51,7 @@ class ZpbwBoundaryTest {
     @Test fun originalNativePairAndNoInventedResponses() {
         val mixin = root.resolve("src/main/java/com/hawkslol/zpbw/mixin/ZpbwTeleportMixin.java").readText()
         assertContains(mixin, "shift = At.Shift.AFTER")
-        assertContains(mixin, "require = 2")
+        assertContains(mixin, "require = ${if (EffectiveSources.nativeTarget == "26.2") 2 else 1}")
         assertContains(mixin, "original.call(connection, response)")
         listOf("ServerboundAcceptTeleportationPacket(", "ServerboundMovePlayerPacket.PosRot(", "ServerboundClientTickEndPacket(", "ServerboundPongPacket(").forEach { assertFalse(runtime.contains(it)) }
         assertContains(runtime, "p.stream.send(original.packet)")
@@ -63,7 +63,9 @@ class ZpbwBoundaryTest {
         assertContains(runtime, "chain.retain(Held.Wire(packet), action = fastAction)")
         assertContains(runtime, "chain.settle(p.generation, packet.id())")
         assertContains(runtime, "return \"Disabled Zero Ping Blinkwarp.\"")
-        assertContains(runtime, "return if (requested == Mode.REPLAY) \"Enabled Zero Ping Blinkwarp.\"")
+        assertContains(runtime, "requested == Mode.REPLAY && recoveryFence.isSuspended(connected)")
+        assertContains(runtime, "Enabled Zero Ping Blinkwarp. Waiting for server synchronization.")
+        assertContains(runtime, "else if (requested == Mode.REPLAY) \"Enabled Zero Ping Blinkwarp.\"")
         assertContains(runtime, "player as ZpbwPlayerAccessor")
         assertContains(runtime, "if (original !is ServerboundMovePlayerPacket &&")
         val connection = root.resolve("src/main/java/com/hawkslol/zpbw/mixin/ZpbwConnectionMixin.java").readText()
@@ -144,7 +146,9 @@ class ZpbwBoundaryTest {
     @Test fun settingsLoadAtStartupAndSessionsClearOnlyInFlightState() {
         assertContains(runtime, "gameDir.resolve(\"config/zpbw\")")
         assertContains(runtime, "mode = if (settings.enabled) Mode.REPLAY else Mode.OFF")
-        assertContains(runtime, "ZpbwSettings(mode == Mode.REPLAY, NoSneakDelay.enabled, timeoutTicks, firstInstall)")
+        assertContains(runtime, "ZpbwSettings(mode == Mode.REPLAY, NoSneakDelay.enabled, timeoutTicks, firstInstall, chain.maximum)")
+        assertContains(runtime, "chain.configureMaximum(settings.chainMax)")
+        assertContains(runtime, "settingsStore.loadWithResult()")
         assertContains(runtime, "firstInstall = settings.firstInstall")
         assertContains(runtime, "firstInstall = false")
         val reset = runtime.substringAfter("fun reset() {").substringBefore("fun status()")

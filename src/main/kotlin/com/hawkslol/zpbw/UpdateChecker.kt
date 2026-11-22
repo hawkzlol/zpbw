@@ -15,7 +15,7 @@ data class UpdateResponse(val statusCode: Int, val body: String = "")
 
 enum class UpdateCheckStatus {
     AVAILABLE, CURRENT, NO_RELEASE, IGNORED_RELEASE, INVALID_VERSION,
-    INVALID_RESPONSE, TOO_LARGE, HTTP_ERROR, NETWORK_ERROR
+    INVALID_RESPONSE, TOO_LARGE, HTTP_ERROR, NETWORK_ERROR, NO_COMPATIBLE_ASSETS
 }
 
 data class UpdateCheckResult(
@@ -27,6 +27,7 @@ data class UpdateCheckResult(
 /** A single anonymous release lookup for this client process; failures never affect gameplay. */
 class UpdateChecker(
     private val currentVersion: String,
+    private val nativeTarget: String,
     private val fetch: () -> UpdateResponse = ::fetchLatestRelease
 ) {
     private val started = AtomicBoolean()
@@ -44,6 +45,7 @@ class UpdateChecker(
             result = try {
                 val local = ReleaseVersion.parse(currentVersion)
                 if (local == null) UpdateCheckResult(UpdateCheckStatus.INVALID_VERSION)
+                else if (nativeTarget !in NATIVE_TARGETS) UpdateCheckResult(UpdateCheckStatus.NO_COMPATIBLE_ASSETS)
                 else evaluate(local, fetch())
             } catch (_: ResponseTooLarge) {
                 UpdateCheckResult(UpdateCheckStatus.TOO_LARGE)
@@ -61,6 +63,8 @@ class UpdateChecker(
             return UpdateCheckResult(UpdateCheckStatus.TOO_LARGE)
         val root = try {
             readRelease(response.body)
+        } catch (_: ResponseTooLarge) {
+            return UpdateCheckResult(UpdateCheckStatus.TOO_LARGE)
         } catch (_: Exception) { null }
             ?: return UpdateCheckResult(UpdateCheckStatus.INVALID_RESPONSE)
         val draft = root.draft
@@ -74,31 +78,44 @@ class UpdateChecker(
             ?: return UpdateCheckResult(UpdateCheckStatus.INVALID_VERSION)
         if (remote.prerelease) return UpdateCheckResult(UpdateCheckStatus.IGNORED_RELEASE)
         if (remote <= local) return UpdateCheckResult(UpdateCheckStatus.CURRENT)
-        return UpdateCheckResult(UpdateCheckStatus.AVAILABLE, tag.removePrefix("v"), safeReleaseUrl(root.url))
+        val version = tag.removePrefix("v")
+        if (tag != "v$version") return UpdateCheckResult(UpdateCheckStatus.NO_COMPATIBLE_ASSETS)
+        val assets = NATIVE_TARGETS.map { target ->
+            val name = "zpbw-mc$target-$version.jar"
+            val asset = root.assets.filter { it.name == name }.singleOrNull()
+                ?: return UpdateCheckResult(UpdateCheckStatus.NO_COMPATIBLE_ASSETS)
+            if (asset.state != "uploaded" || asset.size == null || asset.size!! <= 0 ||
+                !safeAssetUrl(asset.url, tag, name)) return UpdateCheckResult(UpdateCheckStatus.NO_COMPATIBLE_ASSETS)
+            target to asset.url!!
+        }.toMap()
+        return UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version, assets.getValue(nativeTarget))
     }
 
     companion object {
-        const val RELEASES_URL = "https://github.com/hawkzlol/zpbw/releases/latest"
         const val MAX_RESPONSE_BYTES = 65_536
+        const val MAX_RELEASE_ASSETS = 64
+        private val NATIVE_TARGETS = listOf("26.2", "26.3")
 
-        private fun safeReleaseUrl(value: String?): String {
-            if (value == null || value.length > 2_048) return RELEASES_URL
+        private fun safeAssetUrl(value: String?, tag: String, name: String): Boolean {
+            if (value == null || value.length > 2_048) return false
             return try {
                 val uri = URI(value)
-                if (uri.scheme == "https" && uri.host == "github.com" && uri.userInfo == null &&
+                uri.scheme == "https" && uri.host == "github.com" && uri.userInfo == null &&
                     uri.port == -1 && uri.rawQuery == null && uri.rawFragment == null &&
-                    uri.rawPath.startsWith("/hawkzlol/zpbw/releases/") &&
-                    '%' !in uri.rawPath && '\\' !in uri.rawPath && uri.normalize() == uri) value
-                else RELEASES_URL
-            } catch (_: Exception) { RELEASES_URL }
+                    uri.rawPath == "/hawkzlol/zpbw/releases/download/$tag/$name" &&
+                    '%' !in uri.rawPath && '\\' !in uri.rawPath && uri.normalize() == uri
+            } catch (_: Exception) { false }
         }
     }
 }
 
-private data class ReleaseMetadata(var tag: String? = null, var url: String? = null,
-                                   var draft: Boolean? = null, var prerelease: Boolean? = null)
+private data class ReleaseMetadata(var tag: String? = null, var draft: Boolean? = null,
+                                   var prerelease: Boolean? = null, val assets: MutableList<ReleaseAsset> = mutableListOf())
 
-/** Read only the four required fields, with strict syntax and no retained release notes/assets. */
+private data class ReleaseAsset(var name: String? = null, var state: String? = null,
+                                var size: Long? = null, var url: String? = null)
+
+/** Retain only bounded release identity and minimal asset availability, never release notes. */
 @Suppress("DEPRECATION")
 private fun readRelease(body: String): ReleaseMetadata = JsonReader(StringReader(body)).use { reader ->
     reader.isLenient = false
@@ -108,19 +125,22 @@ private fun readRelease(body: String): ReleaseMetadata = JsonReader(StringReader
     while (reader.hasNext()) {
         val name = reader.nextName()
         when (name) {
-            "tag_name", "html_url" -> {
-                require(seen.add(name))
-                if (name == "html_url" && reader.peek() != JsonToken.STRING) {
-                    reader.skipValue()
-                } else {
-                    require(reader.peek() == JsonToken.STRING)
-                    val text = reader.nextString()
-                    if (name == "tag_name") value.tag = text else value.url = text
-                }
+            "tag_name" -> {
+                require(seen.add(name) && reader.peek() == JsonToken.STRING)
+                value.tag = reader.nextString().also { require(it.length <= 64) }
             }
             "draft", "prerelease" -> {
                 require(seen.add(name) && reader.peek() == JsonToken.BOOLEAN)
                 if (name == "draft") value.draft = reader.nextBoolean() else value.prerelease = reader.nextBoolean()
+            }
+            "assets" -> {
+                require(seen.add(name))
+                reader.beginArray()
+                while (reader.hasNext()) {
+                    if (value.assets.size >= UpdateChecker.MAX_RELEASE_ASSETS) throw ResponseTooLarge()
+                    value.assets += readAsset(reader)
+                }
+                reader.endArray()
             }
             else -> reader.skipValue()
         }
@@ -128,6 +148,39 @@ private fun readRelease(body: String): ReleaseMetadata = JsonReader(StringReader
     reader.endObject()
     require(reader.peek() == JsonToken.END_DOCUMENT)
     value
+}
+
+private fun readAsset(reader: JsonReader): ReleaseAsset {
+    val asset = ReleaseAsset()
+    val seen = HashSet<String>()
+    reader.beginObject()
+    while (reader.hasNext()) {
+        val name = reader.nextName()
+        when (name) {
+            "name", "state", "browser_download_url" -> {
+                require(seen.add(name))
+                if (reader.peek() == JsonToken.STRING) {
+                    val text = reader.nextString()
+                    when (name) {
+                        "name" -> asset.name = text.takeIf { it.length <= 256 }
+                        "state" -> asset.state = text.takeIf { it.length <= 32 }
+                        else -> asset.url = text.takeIf { it.length <= 2_048 }
+                    }
+                } else reader.skipValue()
+            }
+            "size" -> {
+                require(seen.add(name))
+                if (reader.peek() == JsonToken.NUMBER) {
+                    asset.size = try { reader.nextString().toBigDecimal().longValueExact() }
+                        catch (_: ArithmeticException) { null }
+                        catch (_: NumberFormatException) { null }
+                } else reader.skipValue()
+            }
+            else -> reader.skipValue()
+        }
+    }
+    reader.endObject()
+    return asset
 }
 
 /** Strict SemVer. Core numbers compare by magnitude without an integer overflow limit. */

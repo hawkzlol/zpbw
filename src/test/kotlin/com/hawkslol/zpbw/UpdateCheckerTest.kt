@@ -1,6 +1,8 @@
 package com.hawkslol.zpbw
 
+import com.google.gson.Gson
 import java.io.IOException
+import java.net.SocketTimeoutException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -12,9 +14,17 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class UpdateCheckerTest {
-    private fun release(tag: String = "v1.0.1", url: String = "https://github.com/hawkzlol/zpbw/releases/tag/v1.0.1",
-                        draft: Boolean = false, prerelease: Boolean = false) = UpdateResponse(200,
-        """{"tag_name":"$tag","html_url":"$url","draft":$draft,"prerelease":$prerelease}""")
+    private fun asset(target: String, version: String = "1.0.1", tag: String = "v$version",
+                      name: String = "zpbw-mc$target-$version.jar", state: String = "uploaded",
+                      size: String = "123", url: String = "https://github.com/hawkzlol/zpbw/releases/download/$tag/$name"): String =
+        """{"name":${Gson().toJson(name)},"state":${Gson().toJson(state)},"size":$size,"browser_download_url":${Gson().toJson(url)}}"""
+
+    private fun pair(version: String = "1.0.1", tag: String = "v$version") =
+        listOf(asset("26.2",version,tag),asset("26.3",version,tag)).joinToString(",", "[", "]")
+
+    private fun release(tag: String = "v1.0.1", draft: Boolean = false, prerelease: Boolean = false,
+                        assets: String? = pair(tag.removePrefix("v"),tag)) = UpdateResponse(200,
+        """{"tag_name":"$tag","draft":$draft,"prerelease":$prerelease${assets?.let { ",\"assets\":$it" } ?: ""}}""")
 
     private fun await(checker: UpdateChecker): UpdateCheckResult {
         val end = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
@@ -22,8 +32,8 @@ class UpdateCheckerTest {
         return assertNotNull(checker.snapshot(), "The single background check did not complete")
     }
 
-    private fun result(local: String = "1.0.0", response: UpdateResponse = release()): UpdateCheckResult {
-        val checker = UpdateChecker(local) { response }
+    private fun result(local: String = "1.0.0", response: UpdateResponse = release(), target: String = "26.2"): UpdateCheckResult {
+        val checker = UpdateChecker(local,target) { response }
         checker.start()
         return await(checker)
     }
@@ -35,7 +45,7 @@ class UpdateCheckerTest {
         var workerDaemon = false
         val caller = Thread.currentThread()
         var background = false
-        val checker = UpdateChecker("1.0.0") {
+        val checker = UpdateChecker("1.0.0","26.3") {
             calls.incrementAndGet()
             workerDaemon = Thread.currentThread().isDaemon
             background = Thread.currentThread() !== caller
@@ -63,15 +73,15 @@ class UpdateCheckerTest {
     @Test fun comparesCoreVersionsNumericallyAndIgnoresBuildMetadata() {
         val cases = listOf(
             Triple("1.0.0", "v1.0.1", true),
-            Triple("1.9.9", "1.10.0", true),
-            Triple("1.0.0", "2.0.0", true),
+            Triple("1.9.9", "v1.10.0", true),
+            Triple("1.0.0", "v2.0.0", true),
             Triple("v1.0.0", "v1.0.0", false),
             Triple("1.0.1", "1.0.0", false),
             Triple("1.10.0", "1.9.99", false),
             Triple("1.0.0+build.6", "1.0.0+build.7", false),
-            Triple("1.0.0-rc.1", "1.0.0", true),
+            Triple("1.0.0-rc.1", "v1.0.0", true),
             Triple("1.1.0-rc.1", "1.0.9", false),
-            Triple("1.999999999999999999999.0", "1.1000000000000000000000.0", true)
+            Triple("1.999999999999999999999.0", "v1.1000000000000000000000.0", true)
         )
         for ((local, remote, newer) in cases) {
             assertEquals(if (newer) UpdateCheckStatus.AVAILABLE else UpdateCheckStatus.CURRENT,
@@ -80,10 +90,12 @@ class UpdateCheckerTest {
     }
 
     @Test fun availableResultContainsOnlyValidatedVersionAndLink() {
-        val update = result()
-        assertEquals(UpdateCheckStatus.AVAILABLE, update.status)
-        assertEquals("1.0.1", update.version)
-        assertEquals("https://github.com/hawkzlol/zpbw/releases/tag/v1.0.1", update.url)
+        for (target in listOf("26.2","26.3")) {
+            val update = result(target=target)
+            assertEquals(UpdateCheckStatus.AVAILABLE, update.status)
+            assertEquals("1.0.1", update.version)
+            assertEquals("https://github.com/hawkzlol/zpbw/releases/download/v1.0.1/zpbw-mc$target-1.0.1.jar", update.url)
+        }
         val current = result("1.0.1")
         assertNull(current.version)
         assertNull(current.url)
@@ -97,7 +109,7 @@ class UpdateCheckerTest {
     @Test fun invalidInstalledVersionDoesNotMakeAnyNetworkRequest() {
         for (version in listOf("unknown", "1.0", "01.0.0", "1.0.0-01", "1.0.0+", "1.0.0\n", "9".repeat(129))) {
             val calls = AtomicInteger()
-            val checker = UpdateChecker(version) { calls.incrementAndGet(); release() }
+            val checker = UpdateChecker(version,"26.2") { calls.incrementAndGet(); release() }
             checker.start()
             assertEquals(UpdateCheckStatus.INVALID_VERSION, await(checker).status, version)
             assertEquals(0, calls.get())
@@ -138,7 +150,7 @@ class UpdateCheckerTest {
 
     @Test fun networkFailureDoesNotLeakExceptionTextOrRetry() {
         val calls = AtomicInteger()
-        val checker = UpdateChecker("1.0.0") { calls.incrementAndGet(); throw IOException("private proxy details") }
+        val checker = UpdateChecker("1.0.0","26.2") { calls.incrementAndGet(); throw IOException("private proxy details") }
         checker.start()
         val value = await(checker)
         assertEquals(UpdateCheckResult(UpdateCheckStatus.NETWORK_ERROR), value)
@@ -147,20 +159,96 @@ class UpdateCheckerTest {
         assertEquals("network_error", checker.status)
     }
 
-    @Test fun remoteUrlCannotNavigateOutsideTheProjectReleasePages() {
+    @Test fun remoteUrlMustBeTheExactCanonicalNativeAssetWithoutAnyFallback() {
+        val expected="https://github.com/hawkzlol/zpbw/releases/download/v1.0.1/zpbw-mc26.2-1.0.1.jar"
         val unsafe = listOf(
-            "http://github.com/hawkzlol/zpbw/releases/tag/v1.0.1",
-            "https://github.com.evil.invalid/hawkzlol/zpbw/releases/tag/v1.0.1",
-            "https://github.com@evil.invalid/hawkzlol/zpbw/releases/tag/v1.0.1",
-            "https://user@github.com/hawkzlol/zpbw/releases/tag/v1.0.1",
-            "https://github.com:444/hawkzlol/zpbw/releases/tag/v1.0.1",
-            "https://github.com/other/repo/releases/tag/v1.0.1",
-            "https://github.com/hawkzlol/zpbw/releases/../../../other",
-            "https://github.com/hawkzlol/zpbw/releases/%2e%2e/other",
-            "https://github.com/hawkzlol/zpbw/releases/tag/v1.0.1?redirect=elsewhere",
+            expected.replace("https:","http:"), expected.replace("github.com","github.com.evil.invalid"),
+            expected.replace("github.com","github.com@evil.invalid"),expected.replace("github.com","user@github.com"),
+            expected.replace("github.com","github.com:443"),expected.replace("hawkzlol/zpbw","other/repo"),
+            expected.replace("/v1.0.1/","/v1.0.0/"), expected.replace("mc26.2","mc26.3"),
+            expected.replace("/download/","/download/../download/"), expected.replace("/download/","/download/%2e%2e/download/"),
+            expected.replace("/download/","/download\\"),expected.replace("mc26.2","mc26%2e2"),
+            "$expected?redirect=elsewhere", "$expected#fragment", "$expected/extra", "$expected/",
+            "https://github.com/hawkzlol/zpbw/releases/latest",
+            "https://github.com/hawkzlol/zpbw/releases/tag/v1.0.1",
             "javascript:alert(1)", "//github.com/hawkzlol/zpbw/releases/latest", "garbage")
-        for (url in unsafe) assertEquals(UpdateChecker.RELEASES_URL, result(response = release(url = url)).url, url)
-        assertEquals(UpdateChecker.RELEASES_URL, result(response = UpdateResponse(200,
-            """{"tag_name":"2.0.0","draft":false,"prerelease":false}""")).url)
+        for (url in unsafe) for (target in listOf("26.2","26.3")) {
+            val value=result(response=release(assets="[${asset("26.2",url=url)},${asset("26.3")}]"),target=target)
+            assertEquals(UpdateCheckResult(UpdateCheckStatus.NO_COMPATIBLE_ASSETS),value,url)
+        }
+    }
+
+    @Test fun missingWrongDuplicateAndLegacyAssetsRemainQuietForBothLanes() {
+        val invalid=listOf<String?>(null,"[]","[${asset("26.2")}]","[${asset("26.3")}]",
+            "[${asset("26.2")},${asset("26.2")},${asset("26.3")}]",
+            "[${asset("26.2")},${asset("26.3")},${asset("26.3")}]",
+            "[${asset("26.2",version="1.0.0")},${asset("26.3")}]",
+            "[${asset("26.2",name="zpbw-1.0.1.jar")},${asset("26.3")}]",
+            "[${asset("26.2",name="zpbw-mc26.2-1.0.1-sources.jar")},${asset("26.3",name="zpbw-mc26.3-1.0.1-debug.jar")}]",
+            "[${asset("26.2",state="new")},${asset("26.3")}]",
+            "[${asset("26.2")},${asset("26.3",state="uploading")}]",
+            "[${asset("26.2",size="0")},${asset("26.3")}]",
+            "[${asset("26.2")},${asset("26.3",size="-1")}]",
+            "[${asset("26.2",size="1.5")},${asset("26.3")}]",
+            "[${asset("26.2",size="null")},${asset("26.3")}]",
+            "[${asset("26.2",size="true")},${asset("26.3")}]",
+            "[${asset("26.2",size="\"123\"")},${asset("26.3")}]",
+            "[${asset("26.2",size="9223372036854775808")},${asset("26.3")}]",
+            "[{\"name\":\"zpbw-mc26.2-1.0.1.jar\"},${asset("26.3")}]")
+        for (assets in invalid) for (target in listOf("26.2","26.3"))
+            assertEquals(UpdateCheckResult(UpdateCheckStatus.NO_COMPATIBLE_ASSETS),result(response=release(assets=assets),target=target),assets)
+        assertEquals(UpdateCheckStatus.NO_COMPATIBLE_ASSETS,result(response=release("1.0.1")).status)
+    }
+
+    @Test fun unrelatedAssetsDoNotReplaceOrInvalidateACompletePair() {
+        val assets="[${asset("26.2")},${asset("26.3")},${asset("26.2",name="zpbw-mc26.2-1.0.1-sources.jar")}]"
+        for (target in listOf("26.2","26.3"))
+            assertEquals(UpdateCheckStatus.AVAILABLE,result(response=release(assets=assets),target=target).status)
+    }
+
+    @Test fun releaseNotesAndGenericPageUrlCannotReplaceNativeAssetIdentity() {
+        val response=release()
+        val withUntrustedMetadata=response.copy(body=response.body.dropLast(1)+
+            ""","body":"private release notes","html_url":"https://untrusted.invalid/redirect"}""")
+        for (target in listOf("26.2","26.3")) {
+            val value=result(response=withUntrustedMetadata,target=target)
+            assertEquals(UpdateCheckStatus.AVAILABLE,value.status)
+            assertEquals("https://github.com/hawkzlol/zpbw/releases/download/v1.0.1/zpbw-mc$target-1.0.1.jar",value.url)
+            assertFalse(value.toString().contains("private"))
+        }
+        val overlongUrl="https://github.com/"+"x".repeat(2_049)
+        assertEquals(UpdateCheckStatus.NO_COMPATIBLE_ASSETS,
+            result(response=release(assets="[${asset("26.2",url=overlongUrl)},${asset("26.3")}]" )).status)
+    }
+
+    @Test fun unsupportedNativeTargetDoesNotFetchOrChooseAnotherLane() {
+        for (target in listOf("26.1","26.3.1","26.2 ","unknown","")) {
+            val calls=AtomicInteger()
+            val checker=UpdateChecker("1.0.0",target) { calls.incrementAndGet(); release() }
+            checker.start()
+            assertEquals(UpdateCheckResult(UpdateCheckStatus.NO_COMPATIBLE_ASSETS),await(checker),target)
+            assertEquals(0,calls.get(),target)
+        }
+    }
+
+    @Test fun boundsAssetCountEvenWhenTheResponseByteLimitIsNotReached() {
+        val assets=List(UpdateChecker.MAX_RELEASE_ASSETS+1) { "{}" }.joinToString(",","[","]")
+        assertEquals(UpdateCheckStatus.TOO_LARGE,result(response=release(assets=assets)).status)
+        val allowed=List(UpdateChecker.MAX_RELEASE_ASSETS) { "{}" }.joinToString(",","[","]")
+        assertEquals(UpdateCheckStatus.NO_COMPATIBLE_ASSETS,result(response=release(assets=allowed)).status)
+    }
+
+    @Test fun malformedDuplicateAssetMetadataIsRejectedWithoutDisclosure() {
+        for (assets in listOf("null","{}","[null]","[\"asset\"]","[{\"name\":\"a\",\"name\":\"b\"}]",
+            "[{\"state\":\"uploaded\",\"state\":\"uploaded\"}]","[{\"size\":1,\"size\":2}]"))
+            assertEquals(UpdateCheckResult(UpdateCheckStatus.INVALID_RESPONSE),result(response=release(assets=assets)))
+    }
+
+    @Test fun timeoutFailureIsBoundedQuietAndDoesNotRetry() {
+        val calls=AtomicInteger()
+        val checker=UpdateChecker("1.0.0","26.3") { calls.incrementAndGet(); throw SocketTimeoutException("private timeout") }
+        checker.start()
+        assertEquals(UpdateCheckResult(UpdateCheckStatus.NETWORK_ERROR),await(checker))
+        checker.start(); assertEquals(1,calls.get())
     }
 }

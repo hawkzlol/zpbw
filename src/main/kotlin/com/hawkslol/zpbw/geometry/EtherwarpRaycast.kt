@@ -10,6 +10,7 @@ import net.minecraft.world.level.block.piston.PistonHeadBlock
 import net.minecraft.world.level.block.state.BlockState
 import net.minecraft.world.phys.Vec3
 import kotlin.math.*
+import com.hawkslol.zpbw.nativebridge.NativeGameAccess
 
 /** Existing voxel geometry with isolated ray/clearance exceptions and bounded diagnostic output.
  * Block exceptions are supported by NoammAddons PR332's author-reported SkyBlock tests;
@@ -17,10 +18,21 @@ import kotlin.math.*
  */
 class EtherwarpRaycast(private val level: BlockGetter, private val chunk: (Int, Int) -> BlockGetter?) {
     data class Result(val succeeded: Boolean, val pos: BlockPos?, val landingFeetY: Int?,
-                      val reason: String, val details: List<String>)
+                      val reason: String, val details: List<String>, val snapshot: Snapshot? = null)
+    data class Cell(val pos: BlockPos, val stateId: Int)
+    data class Snapshot(val start: Vec3, val end: Vec3, val cells: List<Cell>)
     companion object {
         private const val PASSABLE = 1
         private const val BLOCKS_FEET = 2
+
+        /** Bukkit-style server ability direction. Native lookAngle uses a float sine
+         * table; its millimetre error can select an adjacent voxel at a grazing edge. */
+        fun direction(yaw: Float, pitch: Float): Vec3 {
+            val y = Math.toRadians(yaw.toDouble())
+            val p = Math.toRadians(pitch.toDouble())
+            val horizontal = cos(p)
+            return Vec3(-sin(y) * horizontal, -sin(p), cos(y) * horizontal)
+        }
 
         private val etherwarpBlockFlags: IntArray by lazy {
             IntArray(Block.BLOCK_STATE_REGISTRY.size()).apply {
@@ -34,13 +46,13 @@ class EtherwarpRaycast(private val level: BlockGetter, private val chunk: (Int, 
                         is RailBlock, is FireBlock, is VineBlock, is LiquidBlock, is SaplingBlock,
                         is CropBlock, is StemBlock, is SeagrassBlock, is TallSeagrassBlock, is SugarCaneBlock,
                         is MushroomBlock, is NetherWartBlock,
-                        is RedStoneWireBlock, is ComparatorBlock, is RepeaterBlock,
+                        is ComparatorBlock, is RepeaterBlock,
                         is SmallDripleafBlock, is BigDripleafStemBlock, is DoublePlantBlock, is LeverBlock,
                         is SnowLayerBlock, is BubbleColumnBlock, is GrowingPlantBlock, is PistonHeadBlock,
                         is DryVegetationBlock, is ButtonBlock, is LanternBlock,
                         is SkullBlock, is WallSkullBlock, is LadderBlock, is FlowerPotBlock, is WebBlock,
                         is NetherPortalBlock -> true
-                        else -> false
+                        else -> NativeGameAccess.redstoneWire(block)
                     }
                     val blocksFeet = block is SkullBlock || block is WallSkullBlock ||
                         block is FlowerPotBlock || block is LadderBlock ||
@@ -64,11 +76,20 @@ class EtherwarpRaycast(private val level: BlockGetter, private val chunk: (Int, 
         return flags(state) and (PASSABLE or BLOCKS_FEET) == PASSABLE
     }
 
-    fun trace(start: Vec3, end: Vec3): Result {
+    /** Read-only, bounded comparison; an unloaded cell stays unavailable, never loads a chunk. */
+    fun changedCells(snapshot: Snapshot): List<Pair<Cell, Int?>> = snapshot.cells.mapNotNull { cell ->
+        val view = chunk(SectionPos.blockToSectionCoord(cell.pos.x), SectionPos.blockToSectionCoord(cell.pos.z))
+        val current = view?.getBlockState(cell.pos)?.let(Block::getId)
+        if (current == cell.stateId) null else cell to current
+    }
+
+    fun trace(start: Vec3, end: Vec3, capture: Boolean = false): Result {
         val path = ArrayList<String>()
+        val cells = if (capture) ArrayList<Cell>() else null
         fun finish(ok: Boolean, pos: BlockPos?, y: Int?, reason: String, detail: String = ""): Result =
             Result(ok, pos, y, reason, listOf("reason=$reason visited=${path.size} target=$pos feetY=$y $detail") +
-                path.chunked(16).mapIndexed { index, cells -> "pathPart=$index cells=${cells.joinToString(";")}" })
+                path.chunked(16).mapIndexed { index, part -> "pathPart=$index cells=${part.joinToString(";")}" },
+                cells?.let { Snapshot(start, end, it.toList()) })
         if (!listOf(start.x, start.y, start.z, end.x, end.y, end.z).all { it.isFinite() })
             return finish(false, null, null, "non_finite")
         var x = floor(start.x).toInt()
@@ -96,6 +117,7 @@ class EtherwarpRaycast(private val level: BlockGetter, private val chunk: (Int, 
             val view = chunk(SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z))
                 ?: return finish(false, pos, null, "unloaded_chunk")
             val state = view.getBlockState(pos)
+            cells?.add(Cell(pos, Block.getId(state)))
             val flags = flags(state)
             path.add("$x,$y,$z:${Block.getId(state)}:$flags")
             if (flags and PASSABLE == 0) {
@@ -103,6 +125,8 @@ class EtherwarpRaycast(private val level: BlockGetter, private val chunk: (Int, 
                 val baseY = pos.y + max(1, ceil(top).toInt())
                 val feet = view.getBlockState(BlockPos(x, baseY, z))
                 val head = view.getBlockState(BlockPos(x, baseY + 1, z))
+                cells?.add(Cell(BlockPos(x, baseY, z), Block.getId(feet)))
+                cells?.add(Cell(BlockPos(x, baseY + 1, z), Block.getId(head)))
                 val feetClear = clear(feet)
                 val headClear = clear(head)
                 fun describe(s: BlockState) = "${BuiltInRegistries.BLOCK.getKey(s.block)}#${Block.getId(s)}:$s"

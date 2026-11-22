@@ -10,10 +10,10 @@ import kotlin.test.*
 
 /** Structural contracts plus real vanilla result/bytecode checks; live click effects need the lab. */
 class PendingUseClickTest {
-    private val runtime get() = Files.readString(Path.of("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt"))
+    private val runtime get() = Files.readString(EffectiveSources.path("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt"))
     private val click get() = runtime.substringAfter("fun deferUseClick()").substringBefore("fun deferredUseInput()")
     @Test fun deferralIsBeforeVanillaClickAndDoesNotInventItsResultOrSwing() {
-        val hook=Files.readString(Path.of("src/main/java/com/hawkslol/zpbw/mixin/ZpbwEntityClickMixin.java"))
+        val hook=Files.readString(EffectiveSources.path("src/main/java/com/hawkslol/zpbw/mixin/ZpbwEntityClickMixin.java"))
         assertContains(hook,"method=\"startUseItem\",at=@At(\"HEAD\"),cancellable=true")
         assertContains(hook,"ZpbwRuntime.deferUseClick()) ci.cancel()")
         assertContains(click,"deferAction(if (warpClick) \"warp_click\" else \"use_click\")")
@@ -36,7 +36,7 @@ class PendingUseClickTest {
         assertContains(click,"input.`zpbw\$startUseItem`()")
     }
     @Test fun oldLowerLevelDeferralsCannotCreateAnotherSyntheticSwing() {
-        val mixin=Files.readString(Path.of("src/main/java/com/hawkslol/zpbw/mixin/ZpbwUseMixin.java"))
+        val mixin=Files.readString(EffectiveSources.path("src/main/java/com/hawkslol/zpbw/mixin/ZpbwUseMixin.java"))
         assertFalse(mixin.contains("InteractionResult.SUCCESS"))
         assertContains(mixin,"InteractionResult.CONSUME")
         assertEquals(InteractionResult.SwingSource.NONE,InteractionResult.CONSUME.swingSource())
@@ -56,24 +56,24 @@ class PendingUseClickTest {
             "input.`zpbw\$setHitResult`(advancedHit)","mc.crosshairPickEntity = advancedEntity",
             "input.`zpbw\$setRightClickDelay`(delay)")) assertContains(finallyBlock,restore)
         assertContains(click,"if (queued) input.`zpbw\$setRightClickDelay`(4)")
-        val nsd=Files.readString(Path.of("src/main/kotlin/com/hawkslol/zpbw/NoSneakDelay.kt"))
+        val nsd=Files.readString(EffectiveSources.path("src/main/kotlin/com/hawkslol/zpbw/NoSneakDelay.kt"))
         assertContains(nsd,"ZpbwRuntime.deferredUseInput() ?: latch.value")
         assertContains(nsd,"fun sneakForPrediction(): Boolean? = inputForClick()?.shift()")
         assertContains(click,"val clickedInput = NoSneakDelay.inputForClick() ?: player.input.keyPresses")
     }
     @Test fun validArmedBlockClicksReachTheSameFiveWarpItemUsePath() {
         assertFalse(click.contains("(block == null || routed)"), "A valid close block click must not occupy the action journal before its Etherwarp use")
-        assertContains(click,"if (warpClick && recoveryBarrier == null && !recoveryResumePending && chain.canAdd && waitingInputs.isEmpty() && !inputDispatchedThisTick) return false")
+        assertContains(click,"if (warpClick && !positionPending && recoveryBarrier == null && !recoveryResumePending && chain.canAdd && waitingInputs.isEmpty() && !inputDispatchedThisTick) return false")
         assertContains(click,"chain.tail?.value?.target")
-        assertTrue(click.indexOf("if (warpClick && recoveryBarrier == null") < click.indexOf("val queued = deferAction("))
-        assertContains(runtime,"if (mode == Mode.REPLAY && !chain.canAdd)")
+        assertTrue(click.indexOf("if (warpClick && !positionPending") < click.indexOf("val queued = deferAction("))
+        assertContains(runtime,"if (mode == Mode.REPLAY && (positionPending || !chain.canAdd))")
         val route = runtime.substringAfter("fun redirectShovelBlockUse(").substringBefore("fun beforeUse(")
         assertContains(route, "(chain.count > 0 || sneaking) && EtherwarpPredictor.qualifiesForBlockUse")
         assertContains(route, "if (!shovelRoute && !warpRoute) return null")
         assertFalse(route.contains("val warpRoute = chain.count > 0"), "A valid first warp uses the same native ability path")
         assertContains(route, "ShovelBlockUsePolicy.consumeRoutedUse { game.useItem(player, hand) }")
         assertFalse(route.contains("Thread.sleep"))
-        assertEquals(5,ChainLedger<String,String>().maximum)
+        assertEquals(5,ChainLedger<String,String>(responseContract = TestResponseContracts.PAIR).maximum)
     }
     @Test fun packetAbilitiesBehaviorIsNotChangedByThisRepair() {
         assertFalse(runtime.contains("is ServerboundPlayerAbilitiesPacket"))

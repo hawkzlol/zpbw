@@ -105,7 +105,7 @@ class ZpbwLog : AutoCloseable {
         private val PRIVATE_EVENT_NAMES = setOf("CHAT", "USERNAME", "TOKEN", "CREDENTIALS", "SERVER_ADDRESS", "EXCEPTION")
         private val FAILURE_WORDS = listOf("FAIL", "ERROR", "MISMATCH", "CANCEL", "TIMEOUT", "BACKPRESSURE", "FALLBACK", "RESET")
         private val WIRE_EVENTS = setOf(
-            "RETAIN", "FORWARD", "PASS", "SEND", "REPLAY", "NETTY_ADMITTED",
+            "RETAIN", "FORWARD", "PASS", "SEND", "SEND_REQUEST", "REPLAY", "NETTY_ADMITTED",
             "NSD_LATCH_APPLIED", "SOURCE_XYZ_COALESCED"
         )
     }

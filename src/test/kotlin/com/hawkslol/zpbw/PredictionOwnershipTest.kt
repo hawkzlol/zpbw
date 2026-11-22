@@ -1,5 +1,7 @@
 package com.hawkslol.zpbw
 
+import com.hawkslol.zpbw.nativebridge.NativeResponseStep
+
 import kotlin.test.*
 
 class PredictionOwnershipTest {
@@ -62,13 +64,13 @@ class PredictionOwnershipTest {
         lease.invalidateConnection(c); assertTrue(lease.owns(owner, true))
     }
     @Test fun actualChainAndInputCommitmentMustFinishBeforeOwnershipTransfers() {
-        val lease = bound(); val owner = Any(); val chain = ChainLedger<String, String>(); val latch = TickInputLatch<String>()
+        val lease = bound(); val owner = Any(); val chain = ChainLedger<String, String>(responseContract = TestResponseContracts.PAIR); val latch = TickInputLatch<String>()
         fun acquire() = lease.tryAcquire(owner, true, PredictionOwnership.DrainState(
             pending = chain.count, retained = chain.size, actions = chain.hasActions,
             handling = chain.handling, inputCommitted = latch.value != null))
         chain.add(1, "warp"); chain.cut(1); chain.retain("click", action = true)
         assertFalse(acquire()); chain.genuine(1, 42); assertFalse(acquire())
-        chain.response(42, true); assertFalse(acquire()); chain.response(42, false)
+        chain.response(42, NativeResponseStep.ACCEPT_ID); assertFalse(acquire()); chain.response(42, NativeResponseStep.POSITION_ROTATION)
         assertEquals(listOf("click"), chain.settle(1, 42))
         latch.commit("sneak"); assertFalse(acquire())
         latch.sample("unsneak"); assertFalse(acquire())

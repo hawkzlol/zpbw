@@ -2,6 +2,7 @@ package com.hawkslol.zpbw
 
 import net.minecraft.network.protocol.Packet
 import net.minecraft.network.protocol.game.*
+import com.hawkslol.zpbw.nativebridge.NativePacketSemantics
 
 /** Responsive local actions join the held FIFO; never bypass native teleport response ownership. */
 object FastActionPolicy {
@@ -10,8 +11,8 @@ object FastActionPolicy {
     fun worldAction(packet: Packet<*>): Boolean = when (packet) {
         is ServerboundUseItemPacket, is ServerboundUseItemOnPacket,
         is ServerboundAttackPacket, is ServerboundInteractPacket,
-        is ServerboundPlayerActionPacket, is ServerboundSwingPacket -> true
-        else -> false
+        is ServerboundPlayerActionPacket -> true
+        else -> NativePacketSemantics.swing(packet)
     }
 
     fun retains(packet: Packet<*>): Boolean = when (packet) {
@@ -21,7 +22,6 @@ object FastActionPolicy {
         is ServerboundAttackPacket,
         is ServerboundInteractPacket,
         is ServerboundPlayerActionPacket,
-        is ServerboundSwingPacket,
         is ServerboundContainerClickPacket,
         is ServerboundContainerClosePacket,
         is ServerboundContainerButtonClickPacket,
@@ -36,6 +36,6 @@ object FastActionPolicy {
         is ServerboundSetBeaconPacket,
         is ServerboundSignUpdatePacket,
         is ServerboundEditBookPacket -> true
-        else -> false
+        else -> NativePacketSemantics.swing(packet)
     }
 }

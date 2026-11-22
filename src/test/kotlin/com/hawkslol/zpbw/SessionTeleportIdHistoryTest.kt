@@ -1,5 +1,7 @@
 package com.hawkslol.zpbw
 
+import com.hawkslol.zpbw.nativebridge.NativeResponseStep
+
 import kotlin.test.*
 
 class SessionTeleportIdHistoryTest {
@@ -45,12 +47,12 @@ class SessionTeleportIdHistoryTest {
         val connection = Any(); val history = SessionTeleportIdHistory()
         history.bind(connection, Any()); history.record(4) // Earlier world, 07:31:16.
         history.bind(connection, Any()) // Same connection, new world, 07:43:36.
-        val ledger = ChainLedger<String, Any>(); val original = Any()
+        val ledger = ChainLedger<String, Any>(responseContract = TestResponseContracts.PAIR); val original = Any()
         ledger.add(81, "new-world-guess"); ledger.cut(81); ledger.retain(original)
         assertFalse(history.record(4), "07:43:38 genuine ID 4 must not be mistaken for the old world")
         ledger.genuine(81, 4)
         assertFailsWith<IllegalStateException> { ledger.settle(81, 4) }
-        ledger.response(4, true); ledger.response(4, false)
+        ledger.response(4, NativeResponseStep.ACCEPT_ID); ledger.response(4, NativeResponseStep.POSITION_ROTATION)
         assertSame(original, ledger.settle(81, 4).single())
         assertTrue(history.record(4))
     }

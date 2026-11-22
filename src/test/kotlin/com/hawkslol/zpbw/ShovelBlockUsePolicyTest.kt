@@ -8,7 +8,6 @@ import net.minecraft.nbt.CompoundTag
 import net.minecraft.world.InteractionResult
 import net.minecraft.world.item.Items
 import net.minecraft.world.item.ItemStack
-import net.minecraft.world.item.ShovelItem
 import net.minecraft.world.item.component.CustomData
 import net.minecraft.world.level.block.Blocks
 import net.minecraft.world.level.block.CampfireBlock
@@ -16,19 +15,15 @@ import kotlin.test.*
 
 class ShovelBlockUsePolicyTest {
     companion object { init {
-        SharedConstants.tryDetectVersion()
-        Bootstrap.bootStrap()
-        net.minecraft.core.registries.BuiltInRegistries.DATA_COMPONENT_INITIALIZERS
-            .build(net.minecraft.data.registries.VanillaRegistries.createLookup()).forEach { it.apply() }
+        NativeTestRegistry.initialize()
     } }
     private fun item(id: String = "ASPECT_OF_THE_VOID", merged: Boolean = true): ItemStack =
         ItemStack(Items.DIAMOND_SHOVEL).also { stack ->
             val attributes = CompoundTag().also { it.putString("id", id); it.putInt("ethermerge", if (merged) 1 else 0); it.putInt("tuned_transmission", 4) }
             stack.set(DataComponents.CUSTOM_DATA, CustomData.of(CompoundTag().also { it.put("ExtraAttributes", attributes) }))
         }
-    @Test fun flattenableCoverageMatchesActualVanilla26_2Table() {
-        val field = ShovelItem::class.java.getDeclaredField("FLATTENABLES").also { it.isAccessible = true }
-        val vanillaBlocks = (field.get(null) as Map<*, *>).keys.filterIsInstance<net.minecraft.world.level.block.Block>()
+    @Test fun flattenableCoverageMatchesActualReleasedNativeData() {
+        val vanillaBlocks = NativeTestRegistry.flattenableBlocks()
         assertEquals(6, vanillaBlocks.size)
         for (block in vanillaBlocks) {
             assertTrue(ShovelBlockUsePolicy.routes(item(), true, block.defaultBlockState(), Direction.UP, true))

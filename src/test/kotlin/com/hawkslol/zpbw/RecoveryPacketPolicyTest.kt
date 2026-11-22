@@ -1,5 +1,7 @@
 package com.hawkslol.zpbw
 
+import com.hawkslol.zpbw.nativebridge.NativeResponseStep
+
 import net.minecraft.SharedConstants
 import net.minecraft.core.BlockPos
 import net.minecraft.core.Direction
@@ -14,7 +16,7 @@ class RecoveryPacketPolicyTest {
     companion object { init { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap() } }
 
     @Test fun abandonedStallHistoryCannotBurstSimulationTicksOrExecuteWorldActions() {
-        val ledger = ChainLedger<String, Packet<*>>()
+        val ledger = ChainLedger<String, Packet<*>>(responseContract = TestResponseContracts.PAIR)
         val position = TransmittedPositionHistory()
         position.position(0.5, 70.0, 0.5); position.tickEnd()
         ledger.add(1, "warp"); ledger.cut(1)
@@ -25,7 +27,7 @@ class RecoveryPacketPolicyTest {
         }
         ledger.retain(ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
             BlockPos.ZERO, Direction.UP, 1), action = true)
-        ledger.retain(ServerboundSwingPacket(InteractionHand.MAIN_HAND))
+        ledger.retain(NativeTestPackets.swing())
         ledger.retain(ServerboundUseItemPacket(InteractionHand.MAIN_HAND, 2, 0f, 0f), action = true)
         val surviving = ledger.clear().filterNot(RecoveryPacketPolicy::discard)
         assertTrue(surviving.isEmpty())
@@ -52,19 +54,19 @@ class RecoveryPacketPolicyTest {
             assertEquals(action in setOf(ServerboundPlayerCommandPacket.Action.START_SPRINTING,
                 ServerboundPlayerCommandPacket.Action.STOP_SPRINTING), RecoveryPacketPolicy.sprintTransition(action), action.name)
         }
-        assertFalse(RecoveryPacketPolicy.discard(ServerboundAcceptTeleportationPacket(18)))
+        assertFalse(RecoveryPacketPolicy.discard(NativeTestPackets.accept(18)))
     }
 
     @Test fun successfulJournalStillReplaysEveryOriginalTickAndInputAfterBothGenuineResponses() {
-        val ledger = ChainLedger<String, Packet<*>>()
+        val ledger = ChainLedger<String, Packet<*>>(responseContract = TestResponseContracts.PAIR)
         ledger.add(1, "warp"); ledger.cut(1)
         val packets = listOf<Packet<*>>(ServerboundPlayerInputPacket(Input.EMPTY),
             ServerboundMovePlayerPacket.Pos(5.5, 74.05, 5.5, false, false), ServerboundClientTickEndPacket.INSTANCE)
         packets.forEach { ledger.retain(it) }
         ledger.genuine(1, 12)
-        ledger.response(12, true)
+        ledger.response(12, NativeResponseStep.ACCEPT_ID)
         assertFailsWith<IllegalStateException> { ledger.settle(1, 12) }
-        ledger.response(12, false)
+        ledger.response(12, NativeResponseStep.POSITION_ROTATION)
         val replay = ledger.settle(1, 12)
         assertEquals(packets, replay)
         replay.forEachIndexed { i, packet -> assertSame(packets[i], packet) }

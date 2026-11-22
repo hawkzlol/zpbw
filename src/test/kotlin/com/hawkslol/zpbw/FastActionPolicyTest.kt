@@ -1,5 +1,7 @@
 package com.hawkslol.zpbw
 
+import com.hawkslol.zpbw.nativebridge.NativeResponseStep
+
 import net.minecraft.SharedConstants
 import net.minecraft.core.BlockPos
 import net.minecraft.core.Direction
@@ -12,13 +14,18 @@ import net.minecraft.world.phys.BlockHitResult
 import net.minecraft.world.phys.Vec3
 import java.nio.file.Files
 import java.nio.file.Path
+import org.objectweb.asm.ClassReader
+import org.objectweb.asm.Opcodes
+import org.objectweb.asm.tree.ClassNode
+import org.objectweb.asm.tree.MethodInsnNode
+import org.objectweb.asm.tree.TypeInsnNode
 import kotlin.test.*
 
 class FastActionPolicyTest {
     companion object { init { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap() } }
 
     @Test fun pearlAndSlotStayInOrderWithMovementUntilBothNativeResponses() {
-        val ledger = ChainLedger<String, Packet<*>>()
+        val ledger = ChainLedger<String, Packet<*>>(responseContract = TestResponseContracts.PAIR)
         ledger.add(1, "warp"); ledger.cut(1)
         val move = ServerboundMovePlayerPacket.PosRot(3.5, 100.05, 8.5, 45f, -10f, false, false)
         val slot = ServerboundSetCarriedItemPacket(3)
@@ -35,9 +42,9 @@ class FastActionPolicyTest {
         assertEquals(81, pearl.sequence); assertEquals(70f, pearl.yRot); assertEquals(-20f, pearl.xRot)
         ledger.genuine(1, 13)
         assertFailsWith<IllegalStateException> { ledger.settle(1, 13) }
-        ledger.response(13, true)
+        ledger.response(13, NativeResponseStep.ACCEPT_ID)
         assertFailsWith<IllegalStateException> { ledger.settle(1, 13) }
-        ledger.response(13, false)
+        ledger.response(13, NativeResponseStep.POSITION_ROTATION)
         val released = ledger.settle(1, 13)
         assertEquals(4, released.size)
         listOf(move, slot, pearl, tickEnd).forEachIndexed { i, packet -> assertSame(packet, released[i]) }
@@ -45,7 +52,7 @@ class FastActionPolicyTest {
     }
 
     @Test fun actionsDoNotCoalesceOrSettleAnyOverlappingPrediction() {
-        val ledger = ChainLedger<String, Packet<*>>()
+        val ledger = ChainLedger<String, Packet<*>>(responseContract = TestResponseContracts.PAIR)
         for (id in 1L..3L) { ledger.add(id, "warp$id"); ledger.cut(id) }
         val movement = ServerboundMovePlayerPacket.PosRot(Vec3.ZERO, 0f, 0f, false, false)
         ledger.retain(movement)
@@ -53,7 +60,7 @@ class FastActionPolicyTest {
         ledger.retain(action, action = true)
         assertEquals(3, ledger.count); assertEquals(2, ledger.size)
         for (id in 1L..3L) {
-            ledger.genuine(id, id.toInt()); ledger.response(id.toInt(), true); ledger.response(id.toInt(), false)
+            ledger.genuine(id, id.toInt()); ledger.response(id.toInt(), NativeResponseStep.ACCEPT_ID); ledger.response(id.toInt(), NativeResponseStep.POSITION_ROTATION)
             val released = ledger.settle(id, id.toInt())
             if (id < 3) { assertTrue(released.isEmpty()); assertTrue(ledger.hasActions) }
             else { assertSame(movement, released[0]); assertSame(action, released[1]); assertFalse(ledger.hasActions) }
@@ -69,7 +76,7 @@ class FastActionPolicyTest {
             ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, BlockPos.ZERO, Direction.UP, 13),
             ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.DROP_ITEM, BlockPos.ZERO, Direction.DOWN),
             ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.SWAP_ITEM_WITH_OFFHAND, BlockPos.ZERO, Direction.DOWN),
-            ServerboundSwingPacket(InteractionHand.MAIN_HAND), ServerboundContainerClosePacket(1),
+            NativeTestPackets.swing(), ServerboundContainerClosePacket(1),
             ServerboundContainerButtonClickPacket(1, 0))
         packets.forEach { packet ->
             assertTrue(FastActionPolicy.retains(packet), packet.javaClass.simpleName)
@@ -81,12 +88,12 @@ class FastActionPolicyTest {
             ServerboundMovePlayerPacket.PosRot(Vec3.ZERO, 0f, 0f, false, false),
             ServerboundPlayerInputPacket(Input.EMPTY),
             ServerboundClientTickEndPacket.INSTANCE,
-            ServerboundAcceptTeleportationPacket(7))
+            NativeTestPackets.accept(7))
         packets.forEach { assertFalse(FastActionPolicy.retains(it), it.javaClass.simpleName) }
     }
 
     @Test fun failedJournalClearsActionBarrierAndCannotLeakToNewChain() {
-        val ledger = ChainLedger<String, String>(capacity = 2)
+        val ledger = ChainLedger<String, String>(capacity = 2, responseContract = TestResponseContracts.PAIR)
         ledger.add(1, "first"); ledger.cut(1)
         ledger.retain("slot", action = true); ledger.retain("use", action = true)
         assertFailsWith<IllegalStateException> { ledger.retain("overflow", action = true) }
@@ -104,12 +111,12 @@ class FastActionPolicyTest {
         assertFalse(FastActionPolicy.worldAction(ServerboundContainerClosePacket(0)))
         assertFalse(FastActionPolicy.worldAction(ServerboundPlayerInputPacket(Input.EMPTY)))
         assertFalse(FastActionPolicy.worldAction(ServerboundClientTickEndPacket.INSTANCE))
-        val runtime = Files.readString(Path.of("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt"))
+        val runtime = Files.readString(EffectiveSources.path("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt"))
         assertContains(runtime, "forwardRecoveryEnvelope(p.stream, held)")
     }
 
     @Test fun deferredNativeActionDoesNotConsumeItemOrSequenceWhenPredictionIsCancelled() {
-        val ledger = ChainLedger<String, Runnable>()
+        val ledger = ChainLedger<String, Runnable>(responseContract = TestResponseContracts.PAIR)
         var itemCount = 16; var sequence = 8
         val action = Runnable { itemCount--; sequence++ }
         ledger.add(1, "warp"); ledger.cut(1); ledger.retain(action, action = true)
@@ -117,16 +124,27 @@ class FastActionPolicyTest {
         ledger.clear() // Discard invocation; there is no packet or local item mutation to undo.
         assertEquals(16, itemCount); assertEquals(8, sequence)
         ledger.add(2, "next warp"); ledger.cut(2); ledger.retain(action, action = true)
-        ledger.genuine(2, 42); ledger.response(42, true); ledger.response(42, false)
+        ledger.genuine(2, 42); ledger.response(42, NativeResponseStep.ACCEPT_ID); ledger.response(42, NativeResponseStep.POSITION_ROTATION)
         ledger.settle(2, 42).forEach { it.run() }
         assertEquals(15, itemCount); assertEquals(9, sequence)
     }
 
     @Test fun nativeActionInvocationIsDeferredAheadOfVanillaPredictionAndCannotRecursivelyQueue() {
-        val runtime = Files.readString(Path.of("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt"))
-        val mixin = Files.readString(Path.of("src/main/java/com/hawkslol/zpbw/mixin/ZpbwUseMixin.java"))
+        val runtime = Files.readString(EffectiveSources.path("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt"))
+        val mixin = Files.readString(EffectiveSources.path("src/main/java/com/hawkslol/zpbw/mixin/ZpbwUseMixin.java"))
         assertContains(runtime, "if (bypass || dispatchingInput != null || !mc.isSameThread) return false")
-        assertContains(runtime, "chain.retain(Held.Action")
+        // The complete invocation must be stored, never run while it is being captured.
+        // Inspect executable code rather than requiring a particular temporary-variable spelling.
+        val compiled = ClassNode().also { node ->
+            javaClass.classLoader.getResourceAsStream("com/hawkslol/zpbw/ZpbwRuntime.class").use {
+                assertNotNull(it); ClassReader(it).accept(node, 0)
+            }
+        }.methods.single { it.name == "deferAction" && it.desc == "(Ljava/lang/String;Ljava/lang/Runnable;)Z" }
+        val instructions = compiled.instructions.toArray()
+        val created = instructions.indexOfFirst { it is TypeInsnNode && it.opcode == Opcodes.NEW && it.desc.endsWith("ZpbwRuntime\$Held\$Action") }
+        val retained = instructions.indexOfFirst { it is MethodInsnNode && it.owner.endsWith("/ChainLedger") && it.name == "retain" }
+        assertTrue(created >= 0 && retained > created)
+        assertFalse(instructions.any { it is MethodInsnNode && it.owner == "java/lang/Runnable" && it.name == "run" })
         assertContains(runtime, "pose.restore(player); player.inventory.setSelectedSlot(slot)")
         assertContains(runtime, "advanced.restore(player); player.inventory.setSelectedSlot(currentSlot)")
         assertContains(runtime, "accessor.`zpbw\$syncCarriedItem`()")
@@ -137,8 +155,8 @@ class FastActionPolicyTest {
     }
 
     @Test fun runtimeHooksApplyPolicyBeforeRecoveryWithoutChangingNativeOwnership() {
-        val runtime = Files.readString(Path.of("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt"))
-        val client = Files.readString(Path.of("src/main/kotlin/com/hawkslol/zpbw/ZpbwClient.kt"))
+        val runtime = Files.readString(EffectiveSources.path("src/main/kotlin/com/hawkslol/zpbw/ZpbwRuntime.kt"))
+        val client = Files.readString(EffectiveSources.path("src/main/kotlin/com/hawkslol/zpbw/ZpbwClient.kt"))
         assertTrue(runtime.indexOf("FastActionPolicy.keepPendingOnVanillaUse") < runtime.indexOf("recover(\"invalid_dependent_prediction\")"))
         assertTrue(runtime.indexOf("FastActionPolicy.retains(packet)") < runtime.indexOf("chain.retain(Held.Wire(packet"))
         assertFalse(runtime.contains("settings.fast"))

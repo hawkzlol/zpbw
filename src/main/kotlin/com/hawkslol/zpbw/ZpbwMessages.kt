@@ -6,6 +6,7 @@ import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.HoverEvent
 import net.minecraft.network.chat.MutableComponent
 import java.net.URI
+import com.hawkslol.zpbw.nativebridge.NativeIdentity
 
 object ZpbwMessages {
     private const val TITLE = "===== Zero Ping Blinkwarp ====="
@@ -35,6 +36,7 @@ object ZpbwMessages {
     fun plain(text: String) = prefix(Component.literal(text).withStyle(ChatFormatting.WHITE))
     fun selection(text: String) = plain(text)
     fun error(text: String) = prefix(Component.literal(text).withStyle(ChatFormatting.RED))
+    fun recoverySuspended() = prefix(legacy("&cBlinkwarp recovering. &fPredictions resume automatically after server synchronization."))
 
     private fun footer(width: (String) -> Int): Component {
         val count = (2..100).minBy { kotlin.math.abs(width("=".repeat(it)) - width(TITLE)) }
@@ -44,6 +46,7 @@ object ZpbwMessages {
         "\n&f/zpbw &7[on &f|&7 off]&f - Toggles ZPBW" +
         "\n&f/zpbw &7[nosneakdelay &f|&7 nsd]&f - Toggles NoSneakDelay" +
         "\n&f/zpbw &7[timeout <ticks>]&f - Sets Blinkwarp Timeout in Ticks." +
+        "\n&f/zpbw &7[chainmax <value>]&f - Sets chain maximum (1-5, default 5)." +
         "\n&f/zpbw &7[logs] &f- Copies logs to clipboard for troubleshooting.\n")
         .append(footer(width))
 
@@ -60,15 +63,24 @@ object ZpbwMessages {
 
     fun copiedLogs() = prefix(Component.literal("Copied ZPBW logs to clipboard. You can now share it with a developer.")
         .withStyle(ChatFormatting.GREEN))
-    fun updateAvailable(installed: String, available: String, url: String, width: (String) -> Int = { it.length }): Component =
+    fun clipboardFallback() = error("Could not copy ZPBW logs. Check clipboard access and try again. Pasted logs to console instead.")
+    fun updateAvailable(installed: String, available: String, url: String, nativeTarget: String = NativeIdentity.TARGET,
+                        width: (String) -> Int = { it.length }): Component =
         legacy(HEADER + "\n&aA ZPBW update is available!" +
+            "\n&7Minecraft: &f$nativeTarget" +
             "\n&7Installed: &f$installed &7| Latest: &f$available" +
             "\n&fGet the latest version here:\n")
             .append(Component.literal(url).withStyle(ChatFormatting.BLUE, ChatFormatting.UNDERLINE)
                 .withStyle { it.withClickEvent(ClickEvent.OpenUrl(URI.create(url))) })
             .append("\n").append(footer(width))
-    fun waiting(pending: Int, maximum: Int = 5) = error("Waiting for server! ($pending/$maximum)")
+    fun waiting(pending: Int, maximum: Int) = error("Waiting for server! ($pending/$maximum)")
     fun queueFailure(reason: String) = prefix(legacy("&cBlinkwarp failed: &f$reason"))
+    fun queuedCancellation(reason: String, detail: String? = null): Component {
+        val body = legacy("&7Queued action cancelled: &f$reason")
+        if (detail != null) body.withStyle { it.withHoverEvent(HoverEvent.ShowText(
+            Component.literal("Reason: $detail").withStyle(ChatFormatting.WHITE))) }
+        return prefix(body)
+    }
     fun timeout(ticks: Int) = queueFailure("No teleport arrived within $ticks ticks.")
     fun failure(guess: PredictionFailureSupport.Point, actual: PredictionFailureSupport.Point?, reason: String = "position_mismatch", positionConfirmed: Boolean = false): Component {
         val body = when {
