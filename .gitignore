@@ -26,3 +26,6 @@ __pycache__/
 /evidence/
 /private-fixtures/
 /DB_Commands_ran.txt
+
+# Kotlin compiler session/cache files, including native build roots.
+.kotlin/
