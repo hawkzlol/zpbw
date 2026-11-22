@@ -10,6 +10,8 @@ Run `python tools/verify_dual_native.py` with Java25. The wrapper remains Gradle
 
 The verifier refuses missing/failed/skipped tests, wrong routes, opposite-lane dependencies, duplicate entries/FQCNs/resources, private code, wrong metadata/identity, changed inputs and incomplete/stale receipts. It collects only the successful same-run pair, never the newest JAR from an unrelated directory. CI runs the same complete two-lane command on Windows and Linux. Keep prior pair directories immutable.
 
+Downloaded dependencies retain strict checksum verification. Loom's locally generated Minecraft archive can have different ZIP metadata on different machines. Only that exact per-native generated artifact is exempted from the container checksum: a required pre-compilation task instead verifies every decompressed entry against the audited content digest, including classes, resources and version identity. Missing, changed, added or duplicate entries fail the build. Changes to those expected digests require an independent native-input review.
+
 ## Commands and migration
 
 `/zpbw chainmax` prints `Current chain maximum: <value>.` without writing. `/zpbw chainmax <integer>` normalizes to1–5 and prints `Set chain maximum to <value>.` only after same-directory atomic persistence succeeds. Decimal command syntax is invalid. Integral JSON2.0 is accepted; invalid JSON field values default5 without discarding other valid preferences. A load-time migration persistence failure retains valid parsed preferences and reports pending migration; a command save failure preserves the previous live and disk settings.

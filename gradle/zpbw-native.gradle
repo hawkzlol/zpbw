@@ -12,6 +12,20 @@ if (lane == null || projectDir.canonicalFile != new File(productRoot, lane.proje
 version = definitions.productVersion
 group = 'com.hawkslol.zpbw'
 base { archivesName = "zpbw-mc${target}" }
+// Loom generates these archives locally. Verify every decompressed entry before
+// compilation; ZIP timestamps/container metadata vary between machines.
+def nativeArchiveCheck = tasks.register('verifyNativeArchive', Exec) {
+    workingDir productRoot
+    doFirst {
+        def expected = target == '26.2' ? 'minecraft-merged-043a8b3edf-26.2.jar' : 'minecraft-merged-7e9a32a5b8-26.3.jar'
+        def archives = configurations.compileClasspath.files.findAll { it.name == expected }
+        if (archives.size() != 1) throw new GradleException('Expected exactly one generated native archive')
+        commandLine 'python', new File(productRoot, 'tools/verify_native_archive.py'), '--native', target, '--jar', archives.first()
+    }
+}
+tasks.matching { it.name in ['compileKotlin', 'compileJava', 'compileTestKotlin', 'compileTestJava', 'test', 'effectiveSources'] }.configureEach {
+    dependsOn nativeArchiveCheck
+}
 repositories { mavenCentral() }
 dependencies {
     minecraft "com.mojang:minecraft:${target}"

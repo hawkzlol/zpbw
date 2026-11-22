@@ -29,7 +29,7 @@ jobs:
       - name: Verify and build
         shell: bash
         run: |
-          python -m unittest discover -s tools -p test_dual_native.py
+          python -m unittest discover -s tools -p 'test_*.py'
           python tools/verify_dual_native.py
       - name: Show native build failure logs
         if: failure()

@@ -159,3 +159,7 @@ It does not remove network latency itself.
 Anything which fundamentally requires the server to create or return something still has to wait for the server. Server-created entities, projectiles, inventory results and other authoritative state do not magically exist early just because your position was predicted.
 
 The purpose of Blinkwarp is to make the period between clicking an etherwarp and receiving its real confirmation feel as close to zero ping as possible, while still preserving the real server packet order underneath it.
+
+## Credits
+
+Developed by hawkzlol with assistance from OpenAI Codex.
