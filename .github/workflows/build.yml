@@ -39,3 +39,10 @@ jobs:
           for log in sorted(Path('artifacts/build-runs').glob('*/mc*.log')):
               print(str(log))
               print(log.read_text(encoding='utf-8', errors='replace')[-16000:])
+          import hashlib, json, zipfile
+          for jar in sorted(Path('versions').glob('*/.gradle/loom-cache/minecraftMaven/**/*.jar')):
+              if 'minecraft-merged-' not in jar.name: continue
+              with zipfile.ZipFile(jar) as z:
+                  def content_digest(names):
+                      return hashlib.sha256(''.join(n+' '+hashlib.sha256(z.read(n)).hexdigest()+'\n' for n in sorted(names)).encode()).hexdigest()
+                  print('NATIVE_DERIVED_AUDIT '+json.dumps({'name':jar.name,'sha256':hashlib.sha256(jar.read_bytes()).hexdigest(),'entries':content_digest(z.namelist()),'classes':content_digest([n for n in z.namelist() if n.endswith('.class')]),'version':json.loads(z.read('version.json'))['id']}))
