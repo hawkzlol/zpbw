@@ -11,6 +11,20 @@ import java.security.MessageDigest
 import kotlin.test.*
 
 class ZpbwSettingsStoreTest {
+    @Test fun chatPreferencesDefaultToFullAndPersistIndependently() {
+        val directory = Files.createTempDirectory("zpbw-chat-options")
+        val store = ZpbwSettingsStore(directory)
+        Files.writeString(store.path, """{"enabled":true,"chainMax":4,"timeoutTicks":16,"firstInstall":false,"custom":42}""")
+        val start = store.load()
+        assertFalse(start.reducedChatLogs)
+        assertFalse(start.disableChatLogs)
+        val muted = start.copy(reducedChatLogs = true, disableChatLogs = true)
+        store.saveStrict(muted)
+        assertEquals(muted, ZpbwSettingsStore(directory).load())
+        store.saveStrict(muted.copy(disableChatLogs = false))
+        assertEquals(muted.copy(disableChatLogs = false), ZpbwSettingsStore(directory).load())
+        assertEquals(42, JsonParser.parseString(Files.readString(store.path)).asJsonObject.get("custom").asInt)
+    }
     private fun assertBackup(dir: Path, original: ByteArray): Path {
         val digest=MessageDigest.getInstance("SHA-256").digest(original).joinToString("") { "%02x".format(it) }
         val backup=dir.resolve("backups/config-pre-chainmax-1.0.3-$digest.json")
@@ -89,6 +103,24 @@ class ZpbwSettingsStoreTest {
         assertContains(Files.readString(store.path), "\"keep\": true")
         removeBackups(dir); Files.delete(store.path); Files.delete(dir)
     }
+    @Test fun retiredPredictionSettingAloneTriggersMigrationWithoutLosingPreferences() {
+        val dir = Files.createTempDirectory("zpbw-retired-prediction")
+        val store = ZpbwSettingsStore(dir)
+        val original = """{"enabled":true,"noSneakDelay":true,"timeoutTicks":12,"firstInstall":false,"chainMax":2,"experimentalPredictions":{"old":true},"futureSetting":7}"""
+        Files.writeString(store.path, original)
+        val result = store.loadWithResult()
+        assertEquals(ZpbwSettings(true, true, 12, false, 2), result.settings)
+        assertFalse(result.normalizationPending)
+        assertTrue(result.diagnostics.isEmpty())
+        val saved = Files.readString(store.path)
+        assertFalse(saved.contains("experimentalPredictions"))
+        assertContains(saved, "\"futureSetting\": 7")
+        assertBackup(dir, original.toByteArray(Charsets.UTF_8))
+        removeBackups(dir)
+        Files.delete(store.path)
+        Files.delete(dir)
+    }
+
     @Test fun retiredOptionsAreRemovedWithoutDiscardingTheActiveChainLimit() {
         val dir = Files.createTempDirectory("zpbw-settings-migration")
         val store = ZpbwSettingsStore(dir)

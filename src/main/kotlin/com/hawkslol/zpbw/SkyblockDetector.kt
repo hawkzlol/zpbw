@@ -26,12 +26,18 @@ object SkyblockSignals {
         } }
     }
 
-    private fun clean(value: String): String = whitespace.replace(formatting.replace(value, ""), " ").trim()
+    internal fun clean(value: String): String = whitespace.replace(formatting.replace(value, ""), " ").trim()
 }
 
 object SkyblockDetector {
-    fun inSkyblock(client: Minecraft): Boolean {
-        val level = client.level ?: return false
+    internal data class Signals(val title: String, val sidebar: List<String>, val tab: List<String>) {
+        val skyblock get() = SkyblockSignals.matches(title, sidebar, tab)
+    }
+
+    fun inSkyblock(client: Minecraft): Boolean = read(client)?.skyblock == true
+
+    internal fun read(client: Minecraft): Signals? {
+        val level = client.level ?: return null
         val scoreboard = level.scoreboard
         val objective = scoreboard.getDisplayObjective(DisplaySlot.SIDEBAR)
         val sidebar = objective?.let {
@@ -46,6 +52,6 @@ object SkyblockDetector {
             components.`zpbw$getFooter`()?.string?.let(::add)
             client.connection?.listedOnlinePlayers?.forEach { add(overlay.getNameForDisplay(it).string) }
         }
-        return SkyblockSignals.matches(objective?.displayName?.string.orEmpty(), sidebar, tab)
+        return Signals(objective?.displayName?.string.orEmpty(), sidebar, tab)
     }
 }

@@ -8,6 +8,33 @@ import net.minecraft.network.chat.TextColor
 import kotlin.test.*
 
 class ZpbwMessagesTest {
+    @Test fun prereleaseNoticeIsOrangeOptionalAndKeepsTheExactNativeDownloadLink() {
+        val url="https://github.com/hawkzlol/zpbw/releases/download/v1.0.4-pre2/zpbw-mc26.3-1.0.4-pre2.jar"
+        val message=ZpbwMessages.updateAvailable("1.0.4-pre1","1.0.4-pre2",url,"26.3",prerelease=true)
+        assertContains(message.string,"A ZPBW prerelease update is available!")
+        assertContains(message.string,"Updating is optional, but recommended.")
+        assertContains(message.string,"Minecraft: 26.3")
+        val pieces=flattened(message)
+        val orange=pieces.filter{it.siblings.isEmpty() && (it.string.contains("prerelease update")||it.string.contains("Updating is optional"))}
+        assertEquals(2,orange.size)
+        for(piece in orange)
+            assertEquals(TextColor.fromLegacyFormat(ChatFormatting.GOLD),piece.style.color)
+        val link=pieces.first{it.style.clickEvent is ClickEvent.OpenUrl}
+        assertEquals(url,link.string)
+        val stable=ZpbwMessages.updateAvailable("1.0.4-pre2","1.0.4",url).string
+        assertContains(stable,"A ZPBW update is available!");assertFalse(stable.contains("prerelease update"))
+    }
+    @Test fun automaticChatRespectsBothPreferencesAndKeepsFullMessagesLazy() {
+        val timeout = { ZpbwMessages.timeout(20) }
+        assertEquals(timeout().string,
+            ZpbwMessages.automaticChat(false, false, false, timeout)?.string)
+        assertNull(ZpbwMessages.automaticChat(true, false, false) { error("Muted timeout was formatted") })
+        assertEquals("[ZPBW] Blinkwarp Prediction Failed!",
+            ZpbwMessages.automaticChat(true, false, true) { error("Detailed mismatch was formatted") }?.string)
+        for (reduced in listOf(false, true)) {
+            assertNull(ZpbwMessages.automaticChat(reduced, true, true) { error("Disabled notice was formatted") })
+        }
+    }
     private fun flattened(c: Component): List<Component> = listOf(c) + c.siblings.flatMap(::flattened)
     @Test fun suspendedPredictionHasAnExplicitPrefixedRecoveryInstruction() {
         val message = ZpbwMessages.recoverySuspended()
@@ -80,7 +107,7 @@ class ZpbwMessagesTest {
     @Test fun welcomeHasVersionAndClickableUnderlinedProjectLink() {
         val c=ZpbwMessages.welcome("1.0.0")
         assertContains(c.string,"You just installed ZPBW 1.0.0!")
-        assertContains(c.string,"To get started, run /zpbw to see all of the commands.")
+        assertContains(c.string,"To get started, run /zpbw to open settings or /zpbw help for commands.")
         val pieces=flattened(c)
         val installed=pieces.first { it.string=="You just installed ZPBW 1.0.0!\n" }
         assertTrue(installed.style.isBold)
@@ -88,7 +115,7 @@ class ZpbwMessagesTest {
         val command=pieces.first { it.string=="/zpbw" }
         assertEquals(TextColor.fromLegacyFormat(ChatFormatting.WHITE),command.style.color)
         assertFalse(command.style.isBold)
-        val continuation=pieces.first { it.string.startsWith(" to see all of the commands.") }
+        val continuation=pieces.first { it.string.startsWith(" to open settings or ") }
         assertEquals(TextColor.fromLegacyFormat(ChatFormatting.GREEN),continuation.style.color)
         assertFalse(continuation.style.isBold)
         assertEquals(c.string.lines().first().length,c.string.lines().last().length)

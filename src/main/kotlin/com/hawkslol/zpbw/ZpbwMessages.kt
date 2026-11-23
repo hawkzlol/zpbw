@@ -36,6 +36,13 @@ object ZpbwMessages {
     fun plain(text: String) = prefix(Component.literal(text).withStyle(ChatFormatting.WHITE))
     fun selection(text: String) = plain(text)
     fun error(text: String) = prefix(Component.literal(text).withStyle(ChatFormatting.RED))
+    internal fun automaticChat(reduced: Boolean, disabled: Boolean, destinationMismatch: Boolean,
+                               detail: () -> Component): Component? = when {
+        disabled -> null
+        !reduced -> detail()
+        destinationMismatch -> error("Blinkwarp Prediction Failed!")
+        else -> null
+    }
     fun recoverySuspended() = prefix(legacy("&cBlinkwarp recovering. &fPredictions resume automatically after server synchronization."))
 
     private fun footer(width: (String) -> Int): Component {
@@ -43,6 +50,7 @@ object ZpbwMessages {
         return Component.literal("=".repeat(count)).withStyle(ChatFormatting.GRAY)
     }
     fun help(width: (String) -> Int = { it.length }): Component = legacy(HEADER +
+        "\n&f/zpbw&f - Opens settings" +
         "\n&f/zpbw &7[on &f|&7 off]&f - Toggles ZPBW" +
         "\n&f/zpbw &7[nosneakdelay &f|&7 nsd]&f - Toggles NoSneakDelay" +
         "\n&f/zpbw &7[timeout <ticks>]&f - Sets Blinkwarp Timeout in Ticks." +
@@ -52,7 +60,7 @@ object ZpbwMessages {
 
     fun welcome(version: String, width: (String) -> Int = { it.length }): Component = legacy(HEADER +
         "\n&a&lYou just installed ZPBW $version!" +
-        "\n&aTo get started, run &f/zpbw&a to see all of the commands." +
+        "\n&aTo get started, run &f/zpbw&a to open settings or &f/zpbw help&a for commands." +
         "\n&aAs of build version 1.0.0 there has been" +
         "\n&ano recorded ZPBW bans, but please understand" +
         "\n&athat this can change at any time. If you" +
@@ -65,10 +73,12 @@ object ZpbwMessages {
         .withStyle(ChatFormatting.GREEN))
     fun clipboardFallback() = error("Could not copy ZPBW logs. Check clipboard access and try again. Pasted logs to console instead.")
     fun updateAvailable(installed: String, available: String, url: String, nativeTarget: String = NativeIdentity.TARGET,
+                        prerelease: Boolean = false,
                         width: (String) -> Int = { it.length }): Component =
-        legacy(HEADER + "\n&aA ZPBW update is available!" +
+        legacy(HEADER + (if (prerelease) "\n&6A ZPBW prerelease update is available!" else "\n&aA ZPBW update is available!") +
             "\n&7Minecraft: &f$nativeTarget" +
             "\n&7Installed: &f$installed &7| Latest: &f$available" +
+            (if (prerelease) "\n&6Updating is optional, but recommended." else "") +
             "\n&fGet the latest version here:\n")
             .append(Component.literal(url).withStyle(ChatFormatting.BLUE, ChatFormatting.UNDERLINE)
                 .withStyle { it.withClickEvent(ClickEvent.OpenUrl(URI.create(url))) })

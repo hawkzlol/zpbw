@@ -1,5 +1,8 @@
 package com.hawkslol.zpbw
 
+import com.hawkslol.zpbw.overlay.EtherwarpOptions
+import com.hawkslol.zpbw.overlay.EtherwarpSoundTiming
+import com.hawkslol.zpbw.overlay.OverlayShape
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
@@ -19,7 +22,10 @@ import java.security.MessageDigest
 
 data class ZpbwSettings(val enabled: Boolean = false, val noSneakDelay: Boolean = false,
                         val timeoutTicks: Int = 20, val firstInstall: Boolean = true,
-                        val chainMax: Int = 5) {
+                        val chainMax: Int = 5, val reducedChatLogs: Boolean = false,
+                        val disableChatLogs: Boolean = false, val disableInRestrictedLocations: Boolean = true,
+                        val etherwarpOverlay: EtherwarpOptions = EtherwarpOptions(),
+                        val smoothLandings: Boolean = false, val experimentalRepairs: Boolean = true) {
     init { require(timeoutTicks in 2..20); require(chainMax in 1..5) }
 }
 
@@ -33,6 +39,7 @@ class ZpbwSettingsStore(private val directory: Path,
                         }) {
     val path: Path = directory.resolve("config.json")
     private val gson = GsonBuilder().setPrettyPrinting().create()
+    private val retiredOptions = listOf("fast", "intentionalFailure", "experimentalPredictions")
     private data class ConfigDocument(val root: JsonObject, val original: ByteArray? = null)
     private fun existing(dir: Path = directory): ConfigDocument {
         val file = dir.resolve("config.json")
@@ -50,6 +57,10 @@ class ZpbwSettingsStore(private val directory: Path,
         val document = existing()
         val hasConfig = document.original != null
         val root = document.root
+        fun option(key: String, default: Boolean = false): Boolean = root.get(key)?.let {
+            require(it.isJsonPrimitive && it.asJsonPrimitive.isBoolean) { "$key must be a boolean" }
+            it.asBoolean
+        } ?: default
         val enabled = root.get("enabled")?.let {
             require(it.isJsonPrimitive && it.asJsonPrimitive.isBoolean) { "enabled must be a boolean" }
             it.asBoolean
@@ -82,10 +93,14 @@ class ZpbwSettingsStore(private val directory: Path,
             }
         } ?: 5
         val settings = ZpbwSettings(enabled = enabled, noSneakDelay = noSneakDelay,
-            timeoutTicks = ticks, firstInstall = firstInstall, chainMax = chainMax)
+            timeoutTicks = ticks, firstInstall = firstInstall, chainMax = chainMax,
+            reducedChatLogs = option("reducedChatLogs"), disableChatLogs = option("disableChatLogs"),
+            disableInRestrictedLocations = option("disableInRestrictedLocations", true),
+            etherwarpOverlay = readOverlay(root), smoothLandings = option("smoothLandings"),
+            experimentalRepairs = option("experimentalRepairs", true))
         if (hasConfig && (!root.has("firstInstall") || root.get("timeoutTicks")?.asInt != ticks ||
                 root.get("chainMax")?.toString() != chainMax.toString() ||
-                listOf("fast", "intentionalFailure").any(root::has))) {
+                retiredOptions.any(root::has))) {
             try {
                 preserveMigrationOriginal(document.original!!)
                 write(settings, root, strict = true)
@@ -97,7 +112,7 @@ class ZpbwSettingsStore(private val directory: Path,
         return ZpbwSettingsLoadResult(settings, diagnostics = diagnostics)
     }
     fun save(settings: ZpbwSettings) = write(settings, existing().root, strict = false)
-    /** Explicit chain-limit changes commit only when atomic replacement succeeds. */
+    /** Commit explicit settings changes only when atomic replacement succeeds. */
     fun saveStrict(settings: ZpbwSettings) = write(settings, existing().root, strict = true)
     private fun preserveMigrationOriginal(original: ByteArray) {
         val backups = directory.resolve("backups")
@@ -130,11 +145,16 @@ class ZpbwSettingsStore(private val directory: Path,
     private fun write(settings: ZpbwSettings, root: JsonObject, strict: Boolean) {
         root.addProperty("enabled", settings.enabled)
         root.addProperty("chainMax", settings.chainMax)
-        root.remove("intentionalFailure")
+        retiredOptions.forEach(root::remove)
         root.addProperty("timeoutTicks", settings.timeoutTicks)
-        root.remove("fast")
         root.addProperty("noSneakDelay", settings.noSneakDelay)
         root.addProperty("firstInstall", settings.firstInstall)
+        root.addProperty("reducedChatLogs", settings.reducedChatLogs)
+        root.addProperty("disableChatLogs", settings.disableChatLogs)
+        root.addProperty("disableInRestrictedLocations", settings.disableInRestrictedLocations)
+        root.addProperty("smoothLandings", settings.smoothLandings)
+        root.addProperty("experimentalRepairs", settings.experimentalRepairs)
+        writeOverlay(root, settings.etherwarpOverlay)
         Files.createDirectories(directory)
         val temporary = Files.createTempFile(directory, "zpbw-config-", ".tmp")
         try {
@@ -145,5 +165,49 @@ class ZpbwSettingsStore(private val directory: Path,
                 Files.move(temporary, path, REPLACE_EXISTING)
             }
         } finally { Files.deleteIfExists(temporary) }
+    }
+
+    private fun readOverlay(root: JsonObject): EtherwarpOptions {
+        val section = root.get("etherwarpOverlay")?.takeIf { it.isJsonObject }?.asJsonObject ?: return EtherwarpOptions()
+        val defaults = EtherwarpOptions()
+        fun flag(key: String, default: Boolean = false) = section.get(key)
+            ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }?.asBoolean ?: default
+        fun text(key: String) = section.get(key)
+            ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+        fun number(key: String, default: Float) = section.get(key)
+            ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asFloat ?: default
+        fun color(key: String, default: Int) = text(key)?.takeIf { it.matches(Regex("[0-9a-fA-F]{8}")) }
+            ?.toLongOrNull(16)?.toInt() ?: default
+        val width = runCatching { section.get("lineWidth")?.asBigDecimal?.intValueExact() }.getOrNull()
+        return EtherwarpOptions(flag("enabled"), color("successFill", defaults.successFill),
+            color("successOutline", defaults.successOutline), color("failFill", defaults.failFill),
+            color("failOutline", defaults.failOutline), OverlayShape.entries.firstOrNull { it.name == text("style") } ?: defaults.style,
+            width?.coerceIn(1, 8) ?: defaults.lineWidth, flag("depth"), flag("fullBlock", true),
+            flag("customSound"), EtherwarpSoundTiming.entries.firstOrNull { it.name == text("soundTiming") } ?: defaults.soundTiming,
+            text("soundId")?.takeIf { EtherwarpOptions.acceptsSoundId(it) } ?: defaults.soundId,
+            EtherwarpOptions.volume(number("soundVolume", defaults.soundVolume)),
+            EtherwarpOptions.pitch(number("soundPitch", defaults.soundPitch)),
+            showAlways = flag("showAlways"), soundOnFailedWarps = flag("soundOnFailedWarps"))
+    }
+
+    private fun writeOverlay(root: JsonObject, options: EtherwarpOptions) {
+        val section = root.get("etherwarpOverlay")?.takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
+        section.addProperty("enabled", options.enabled)
+        for ((key, value) in listOf("successFill" to options.successFill, "successOutline" to options.successOutline,
+            "failFill" to options.failFill, "failOutline" to options.failOutline)) {
+            section.addProperty(key, value.toUInt().toString(16).padStart(8, '0'))
+        }
+        section.addProperty("style", options.style.name)
+        section.addProperty("lineWidth", options.lineWidth)
+        section.addProperty("depth", options.depth)
+        section.addProperty("fullBlock", options.fullBlock)
+        section.addProperty("customSound", options.customSound)
+        section.addProperty("soundTiming", options.soundTiming.name)
+        section.addProperty("soundId", options.soundId)
+        section.addProperty("soundVolume", options.soundVolume)
+        section.addProperty("soundPitch", options.soundPitch)
+        section.addProperty("showAlways", options.showAlways)
+        section.addProperty("soundOnFailedWarps", options.soundOnFailedWarps)
+        root.add("etherwarpOverlay", section)
     }
 }

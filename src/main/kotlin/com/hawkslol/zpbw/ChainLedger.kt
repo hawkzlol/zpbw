@@ -58,22 +58,22 @@ class ChainLedger<P, T>(private val capacity: Int = 512,
         check(!nativeFallback && count > 0 && !handling && pending.all { it.cut })
         return rebaseJournal().also { nativeFallback = true }
     }
-    fun genuine(generation: Long, id: Int) {
-        check(!nativeFallback)
+    fun genuine(generation: Long, id: Int, nativeRecovery: Boolean = false) {
+        check(nativeRecovery == nativeFallback)
         val entry = head ?: error("no pending use")
         check(entry.generation == generation && entry.cut && !handling)
         entry.realId = id
         hasConfirmedPrefix = true
     }
-    fun response(id: Int, step: NativeResponseStep) {
-        check(!nativeFallback)
+    fun response(id: Int, step: NativeResponseStep, nativeRecovery: Boolean = false) {
+        check(nativeRecovery == nativeFallback)
         val entry = head ?: error("no handler")
         check(entry.realId == id && handling)
         check(responseContract.getOrNull(entry.responses) == step)
         entry.responses++
     }
-    fun settle(generation: Long, id: Int): List<T> {
-        check(!nativeFallback)
+    fun settle(generation: Long, id: Int, nativeRecovery: Boolean = false): List<T> {
+        check(nativeRecovery == nativeFallback)
         val entry = head ?: error("no handler")
         check(entry.generation == generation && entry.realId == id && entry.responses == responseContract.size)
         pending.removeFirst()

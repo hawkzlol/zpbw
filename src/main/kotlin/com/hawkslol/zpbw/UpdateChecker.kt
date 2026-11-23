@@ -21,7 +21,8 @@ enum class UpdateCheckStatus {
 data class UpdateCheckResult(
     val status: UpdateCheckStatus,
     val version: String? = null,
-    val url: String? = null
+    val url: String? = null,
+    val prerelease: Boolean = false
 )
 
 /** A single anonymous release lookup for this client process; failures never affect gameplay. */
@@ -61,22 +62,30 @@ class UpdateChecker(
         if (response.statusCode != 200) return UpdateCheckResult(UpdateCheckStatus.HTTP_ERROR)
         if (response.body.length > MAX_RESPONSE_BYTES || response.body.toByteArray(UTF_8).size > MAX_RESPONSE_BYTES)
             return UpdateCheckResult(UpdateCheckStatus.TOO_LARGE)
-        val root = try {
-            readRelease(response.body)
+        val releases = try {
+            readReleases(response.body)
         } catch (_: ResponseTooLarge) {
             return UpdateCheckResult(UpdateCheckStatus.TOO_LARGE)
         } catch (_: Exception) { null }
             ?: return UpdateCheckResult(UpdateCheckStatus.INVALID_RESPONSE)
+        if (releases.isEmpty()) return UpdateCheckResult(UpdateCheckStatus.NO_RELEASE)
+        val results = releases.map { evaluateRelease(local, it) }
+        return results.filter { it.status == UpdateCheckStatus.AVAILABLE }
+            .maxByOrNull { candidateVersion(it.version!!, it.prerelease)!! }
+            ?: results.firstOrNull { it.status == UpdateCheckStatus.CURRENT }
+            ?: results.first()
+    }
+
+    private fun evaluateRelease(local: ReleaseVersion, root: ReleaseMetadata): UpdateCheckResult {
         val draft = root.draft
             ?: return UpdateCheckResult(UpdateCheckStatus.INVALID_RESPONSE)
         val prerelease = root.prerelease
             ?: return UpdateCheckResult(UpdateCheckStatus.INVALID_RESPONSE)
-        if (draft || prerelease) return UpdateCheckResult(UpdateCheckStatus.IGNORED_RELEASE)
+        if (draft) return UpdateCheckResult(UpdateCheckStatus.IGNORED_RELEASE)
         val tag = root.tag
             ?: return UpdateCheckResult(UpdateCheckStatus.INVALID_RESPONSE)
-        val remote = ReleaseVersion.parse(tag)
+        val remote = candidateVersion(tag, prerelease)
             ?: return UpdateCheckResult(UpdateCheckStatus.INVALID_VERSION)
-        if (remote.prerelease) return UpdateCheckResult(UpdateCheckStatus.IGNORED_RELEASE)
         if (remote <= local) return UpdateCheckResult(UpdateCheckStatus.CURRENT)
         val version = tag.removePrefix("v")
         if (tag != "v$version") return UpdateCheckResult(UpdateCheckStatus.NO_COMPATIBLE_ASSETS)
@@ -88,12 +97,14 @@ class UpdateChecker(
                 !safeAssetUrl(asset.url, tag, name)) return UpdateCheckResult(UpdateCheckStatus.NO_COMPATIBLE_ASSETS)
             target to asset.url!!
         }.toMap()
-        return UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version, assets.getValue(nativeTarget))
+        return UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version, assets.getValue(nativeTarget),
+            prerelease || remote.prerelease.isNotEmpty())
     }
 
     companion object {
         const val MAX_RESPONSE_BYTES = 65_536
         const val MAX_RELEASE_ASSETS = 64
+        const val MAX_RELEASES = 10
         private val NATIVE_TARGETS = listOf("26.2", "26.3")
 
         private fun safeAssetUrl(value: String?, tag: String, name: String): Boolean {
@@ -109,6 +120,11 @@ class UpdateChecker(
     }
 }
 
+// The first prerelease was published as v1.0.4. Keep its assets/URLs immutable while
+// comparing it as pre1, so it cannot masquerade as a newer stable build than pre2.
+private fun candidateVersion(tag: String, prerelease: Boolean): ReleaseVersion? =
+    ReleaseVersion.parse(if (prerelease && tag.removePrefix("v") == "1.0.4") "1.0.4-pre1" else tag)
+
 private data class ReleaseMetadata(var tag: String? = null, var draft: Boolean? = null,
                                    var prerelease: Boolean? = null, val assets: MutableList<ReleaseAsset> = mutableListOf())
 
@@ -117,8 +133,22 @@ private data class ReleaseAsset(var name: String? = null, var state: String? = n
 
 /** Retain only bounded release identity and minimal asset availability, never release notes. */
 @Suppress("DEPRECATION")
-private fun readRelease(body: String): ReleaseMetadata = JsonReader(StringReader(body)).use { reader ->
+private fun readReleases(body: String): List<ReleaseMetadata> = JsonReader(StringReader(body)).use { reader ->
     reader.isLenient = false
+    val values = mutableListOf<ReleaseMetadata>()
+    if (reader.peek() == JsonToken.BEGIN_ARRAY) {
+        reader.beginArray()
+        while (reader.hasNext()) {
+            if (values.size >= UpdateChecker.MAX_RELEASES) throw ResponseTooLarge()
+            values += readRelease(reader)
+        }
+        reader.endArray()
+    } else values += readRelease(reader) // Also accepts the previous single-release shape.
+    require(reader.peek() == JsonToken.END_DOCUMENT)
+    values
+}
+
+private fun readRelease(reader: JsonReader): ReleaseMetadata {
     val value = ReleaseMetadata()
     val seen = HashSet<String>()
     reader.beginObject()
@@ -146,8 +176,7 @@ private fun readRelease(body: String): ReleaseMetadata = JsonReader(StringReader
         }
     }
     reader.endObject()
-    require(reader.peek() == JsonToken.END_DOCUMENT)
-    value
+    return value
 }
 
 private fun readAsset(reader: JsonReader): ReleaseAsset {
@@ -184,7 +213,7 @@ private fun readAsset(reader: JsonReader): ReleaseAsset {
 }
 
 /** Strict SemVer. Core numbers compare by magnitude without an integer overflow limit. */
-private data class ReleaseVersion(val core: List<String>, val prerelease: Boolean) : Comparable<ReleaseVersion> {
+private data class ReleaseVersion(val core: List<String>, val prerelease: List<String>) : Comparable<ReleaseVersion> {
     override fun compareTo(other: ReleaseVersion): Int {
         for (i in core.indices) {
             val lengthOrder = core[i].length.compareTo(other.core[i].length)
@@ -192,8 +221,19 @@ private data class ReleaseVersion(val core: List<String>, val prerelease: Boolea
             val valueOrder = core[i].compareTo(other.core[i])
             if (valueOrder != 0) return valueOrder
         }
-        // Only stable remote releases are candidates. Build metadata never affects precedence.
-        return other.prerelease.compareTo(prerelease)
+        if (prerelease.isEmpty() || other.prerelease.isEmpty())
+            return prerelease.isEmpty().compareTo(other.prerelease.isEmpty())
+        for (i in 0 until minOf(prerelease.size, other.prerelease.size)) {
+            val a = prerelease[i]; val b = other.prerelease[i]
+            val an = a.all(Char::isDigit); val bn = b.all(Char::isDigit)
+            val order = when {
+                an && bn -> a.length.compareTo(b.length).takeIf { it != 0 } ?: a.compareTo(b)
+                an != bn -> if (an) -1 else 1
+                else -> a.compareTo(b)
+            }
+            if (order != 0) return order
+        }
+        return prerelease.size.compareTo(other.prerelease.size)
     }
 
     companion object {
@@ -203,7 +243,10 @@ private data class ReleaseVersion(val core: List<String>, val prerelease: Boolea
             val match = pattern.matchEntire(value) ?: return null
             val pre = match.groupValues[4]
             if (pre.split('.').any { it.length > 1 && it[0] == '0' && it.all(Char::isDigit) }) return null
-            return ReleaseVersion((1..3).map { match.groupValues[it] }, pre.isNotEmpty())
+            // Project preN names are ordered numerically, like the equivalent pre.N spelling.
+            val identifiers = if (pre.matches(Regex("pre[1-9][0-9]*"))) listOf("pre", pre.removePrefix("pre"))
+                else if (pre.isEmpty()) emptyList() else pre.split('.')
+            return ReleaseVersion((1..3).map { match.groupValues[it] }, identifiers)
         }
     }
 }
@@ -211,7 +254,7 @@ private data class ReleaseVersion(val core: List<String>, val prerelease: Boolea
 private class ResponseTooLarge : IOException()
 
 private fun fetchLatestRelease(): UpdateResponse {
-    val connection = URI("https://api.github.com/repos/hawkzlol/zpbw/releases/latest")
+    val connection = URI("https://api.github.com/repos/hawkzlol/zpbw/releases?per_page=${UpdateChecker.MAX_RELEASES}")
         .toURL().openConnection() as HttpsURLConnection
     connection.apply {
         requestMethod = "GET"

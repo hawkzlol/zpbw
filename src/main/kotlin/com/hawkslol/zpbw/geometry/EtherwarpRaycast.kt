@@ -83,12 +83,14 @@ class EtherwarpRaycast(private val level: BlockGetter, private val chunk: (Int, 
         if (current == cell.stateId) null else cell to current
     }
 
-    fun trace(start: Vec3, end: Vec3, capture: Boolean = false): Result {
-        val path = ArrayList<String>()
+    fun trace(start: Vec3, end: Vec3, capture: Boolean = false, detailed: Boolean = true): Result {
+        val path = if (detailed) ArrayList<String>() else null
         val cells = if (capture) ArrayList<Cell>() else null
         fun finish(ok: Boolean, pos: BlockPos?, y: Int?, reason: String, detail: String = ""): Result =
-            Result(ok, pos, y, reason, listOf("reason=$reason visited=${path.size} target=$pos feetY=$y $detail") +
-                path.chunked(16).mapIndexed { index, part -> "pathPart=$index cells=${part.joinToString(";")}" },
+            Result(ok, pos, y, reason, path?.let { visited ->
+                listOf("reason=$reason visited=${visited.size} target=$pos feetY=$y $detail") +
+                    visited.chunked(16).mapIndexed { index, part -> "pathPart=$index cells=${part.joinToString(";")}" }
+            } ?: emptyList(),
                 cells?.let { Snapshot(start, end, it.toList()) })
         if (!listOf(start.x, start.y, start.z, end.x, end.y, end.z).all { it.isFinite() })
             return finish(false, null, null, "non_finite")
@@ -119,7 +121,7 @@ class EtherwarpRaycast(private val level: BlockGetter, private val chunk: (Int, 
             val state = view.getBlockState(pos)
             cells?.add(Cell(pos, Block.getId(state)))
             val flags = flags(state)
-            path.add("$x,$y,$z:${Block.getId(state)}:$flags")
+            path?.add("$x,$y,$z:${Block.getId(state)}:$flags")
             if (flags and PASSABLE == 0) {
                 val top = state.getCollisionShape(level, pos).max(Direction.Axis.Y)
                 val baseY = pos.y + max(1, ceil(top).toInt())
@@ -130,7 +132,7 @@ class EtherwarpRaycast(private val level: BlockGetter, private val chunk: (Int, 
                 val feetClear = clear(feet)
                 val headClear = clear(head)
                 fun describe(s: BlockState) = "${BuiltInRegistries.BLOCK.getKey(s.block)}#${Block.getId(s)}:$s"
-                val detail = "hit=${describe(state)} collisionTop=$top feet=${describe(feet)} feetClear=$feetClear head=${describe(head)} headClear=$headClear"
+                val detail = if (detailed) "hit=${describe(state)} collisionTop=$top feet=${describe(feet)} feetClear=$feetClear head=${describe(head)} headClear=$headClear" else ""
                 return finish(feetClear && headClear, pos, baseY,
                     if (!feetClear) "blocked_feet" else if (!headClear) "blocked_head" else "landing", detail)
             }

@@ -6,6 +6,18 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.*
 
 class ZpbwLogTest {
+    @Test fun lagCompensationTriggerAndDrainSurviveNoisyLifecycleTraffic() {
+        val log=ZpbwLog()
+        log.record("EXPERIMENTAL_STALL generation=3 reason=hold_limit holdAgeUs=750001 pending=2 retained=4")
+        log.record("EXPERIMENTAL_STALE_SETTLEMENT generation=4 discarded=9")
+        log.record("REPAIR_GENUINE_DRAIN_COMPLETE id=13")
+        repeat(2000){log.record("PREPARED generation=$it")}
+        val report=log.snapshot()
+        assertContains(report,"EXPERIMENTAL_STALL generation=3 reason=hold_limit holdAgeUs=750001 pending=2 retained=4")
+        assertContains(report,"EXPERIMENTAL_STALE_SETTLEMENT generation=4 discarded=9")
+        assertContains(report,"REPAIR_GENUINE_DRAIN_COMPLETE id=13")
+        assertTrue(report.toByteArray().size<=ZpbwLog.MAX_SNAPSHOT_BYTES)
+    }
     @Test fun noisyTrafficIsAggregatedWithoutEvictingUsefulEvents() {
         val log = ZpbwLog()
         log.record("INITIALIZED version=test")
@@ -30,6 +42,16 @@ class ZpbwLogTest {
         assertContains(snapshot, "FALLBACK reason=wrong_position generation=7")
         assertContains(snapshot, "PREPARED generation=1999")
         assertFalse("PREPARED generation=0\n" in snapshot)
+    }
+
+    @Test fun mismatchContextAndFollowingPositionsSurviveNoisyLifecycleTraffic() {
+        val log = ZpbwLog()
+        log.record("PREDICTION_MISMATCH_CONTEXT generation=33 rayOrigin=1,2,3")
+        log.record("PREDICTION_MISMATCH_FOLLOWUP generation=33 index=1 matchesGuess=true")
+        repeat(2_000) { log.record("PREPARED generation=$it") }
+        val snapshot = log.snapshot()
+        assertContains(snapshot, "PREDICTION_MISMATCH_CONTEXT generation=33 rayOrigin=1,2,3")
+        assertContains(snapshot, "PREDICTION_MISMATCH_FOLLOWUP generation=33 index=1 matchesGuess=true")
     }
 
     @Test fun snapshotsAndOversizedUnicodeRecordsStayBounded() {

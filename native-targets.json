@@ -1,5 +1,5 @@
 {
-  "productVersion": "1.0.3",
+  "productVersion": "1.0.4-pre2",
   "modId": "zpbw",
   "java": 25,
   "kotlin": "2.4.10",
@@ -17,7 +17,9 @@
         "kotlin/com/hawkslol/zpbw/nativebridge/NativeIdentity.kt",
         "kotlin/com/hawkslol/zpbw/nativebridge/NativeTeleportContract.kt",
         "kotlin/com/hawkslol/zpbw/nativebridge/NativePacketSemantics.kt",
-        "kotlin/com/hawkslol/zpbw/nativebridge/NativeGameAccess.kt"
+        "kotlin/com/hawkslol/zpbw/nativebridge/NativeGameAccess.kt",
+        "kotlin/com/hawkslol/zpbw/nativebridge/NativeOverlayPipeline.kt",
+        "kotlin/com/hawkslol/zpbw/nativebridge/NativeTextFocus.kt"
       ],
       "replacements": []
     },
@@ -32,6 +34,8 @@
         "kotlin/com/hawkslol/zpbw/nativebridge/NativeTeleportContract.kt",
         "kotlin/com/hawkslol/zpbw/nativebridge/NativePacketSemantics.kt",
         "kotlin/com/hawkslol/zpbw/nativebridge/NativeGameAccess.kt",
+        "kotlin/com/hawkslol/zpbw/nativebridge/NativeOverlayPipeline.kt",
+        "kotlin/com/hawkslol/zpbw/nativebridge/NativeTextFocus.kt",
         "java/com/hawkslol/zpbw/mixin/ZpbwSneakSampleMixin.java",
         "java/com/hawkslol/zpbw/mixin/ZpbwSourceTickMixin.java",
         "java/com/hawkslol/zpbw/mixin/ZpbwTeleportMixin.java"

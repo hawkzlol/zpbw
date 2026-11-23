@@ -101,9 +101,39 @@ class UpdateCheckerTest {
         assertNull(current.url)
     }
 
-    @Test fun ignoresDraftAndPrereleaseEntriesIncludingMislabelledTags() {
-        for (response in listOf(release(draft = true), release(prerelease = true), release("2.0.0-rc.1")))
-            assertEquals(UpdateCheckStatus.IGNORED_RELEASE, result(response = response).status)
+    @Test fun ignoresDraftButLabelsBothMetadataAndVersionPrereleases() {
+        assertEquals(UpdateCheckStatus.IGNORED_RELEASE,result(response=release(draft=true)).status)
+        for(response in listOf(release(prerelease=true),release("v2.0.0-rc.1"))) {
+            val update=result(response=response)
+            assertEquals(UpdateCheckStatus.AVAILABLE,update.status);assertTrue(update.prerelease)
+        }
+    }
+    private fun releases(vararg entries: UpdateResponse)=UpdateResponse(200,entries.joinToString(",","[","]"){it.body})
+    @Test fun selectsHighestCompleteNativePairFromBoundedListRegardlessOfPublicationOrder() {
+        val response=releases(release("v1.0.4-pre1",prerelease=true),release("v1.0.3"),
+            release("v1.0.4-pre2",prerelease=true),release("v9.0.0",draft=true))
+        for(target in listOf("26.2","26.3")) {
+            val update=result("1.0.4-pre1",response,target)
+            assertEquals("1.0.4-pre2",update.version);assertTrue(update.prerelease)
+            assertEquals("https://github.com/hawkzlol/zpbw/releases/download/v1.0.4-pre2/zpbw-mc$target-1.0.4-pre2.jar",update.url)
+        }
+        assertEquals(UpdateCheckStatus.NO_RELEASE,result(response=UpdateResponse(200,"[]")).status)
+        assertEquals(UpdateCheckStatus.CURRENT,result("1.0.4-pre2",response).status)
+        val incomplete=release("v1.0.5-pre1",prerelease=true,assets="[${asset("26.2","1.0.5-pre1")}]")
+        assertEquals("1.0.4-pre2",result(response=releases(incomplete,release("v1.0.4-pre2",prerelease=true))).version)
+    }
+    @Test fun prereleasePrecedenceAndLegacyPre1DoNotCreateDowngradeNotices() {
+        for((local,remote,newer) in listOf(
+            Triple("1.0.4-pre1","v1.0.4-pre2",true),Triple("1.0.4-pre2","v1.0.4-pre1",false),
+            Triple("1.0.4-pre2","v1.0.4-pre10",true),Triple("1.0.4-rc.2","v1.0.4-rc.10",true),
+            Triple("1.0.4-rc.10","v1.0.4-rc.2",false),Triple("1.0.4-rc.1","v1.0.4-rc.1.1",true),
+            Triple("1.0.4-alpha","v1.0.4-beta",true),Triple("1.0.4","v1.0.4-pre2",false)
+        )) assertEquals(if(newer)UpdateCheckStatus.AVAILABLE else UpdateCheckStatus.CURRENT,
+            result(local,release(remote,prerelease=true)).status,"$local -> $remote")
+        assertEquals(UpdateCheckStatus.CURRENT,result("1.0.4-pre2",release("v1.0.4",prerelease=true)).status)
+        val stable=result("1.0.4-pre2",release("v1.0.4"))
+        assertEquals(UpdateCheckStatus.AVAILABLE,stable.status);assertFalse(stable.prerelease)
+        assertEquals(UpdateCheckStatus.TOO_LARGE,result(response=releases(*Array(11){release()})).status)
     }
 
     @Test fun invalidInstalledVersionDoesNotMakeAnyNetworkRequest() {
@@ -132,7 +162,7 @@ class UpdateCheckerTest {
     }
 
     @Test fun malformedOrUnexpectedPayloadsAreQuiet() {
-        val bodies = listOf("", "<html>oops</html>", "null", "[]", "{}",
+        val bodies = listOf("", "<html>oops</html>", "null", "{}",
             """{"tag_name":2,"draft":false,"prerelease":false}""",
             """{"tag_name":"2.0.0","draft":"false","prerelease":false}""",
             """{"tag_name":"2.0.0","draft":false}""",

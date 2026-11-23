@@ -1,5 +1,6 @@
 package com.hawkslol.zpbw
 
+import java.util.concurrent.CompletableFuture
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -21,27 +22,51 @@ class ClipboardReportTest {
     }
     @Test fun verifiedCopyDoesNotPrintToConsole() {
         val written = mutableListOf<String>(); val console = mutableListOf<String>()
-        assertTrue(ClipboardReport.copyOrLog(report, written::add, { report }, console::add))
+        assertTrue(ClipboardReport.copyOrLog(report, written::add, { report }, console::add) {
+            error("Desktop fallback must not run after a confirmed native copy")
+        }.join())
         assertEquals(listOf(report), written); assertTrue(console.isEmpty())
     }
     @Test fun windowsCopyDoesNotProduceAnUnnecessaryConsoleDump() {
         val console = mutableListOf<String>()
-        assertTrue(ClipboardReport.copyOrLog(report, {}, { report.replace("\n", "\r\n") }, console::add))
+        assertTrue(ClipboardReport.copyOrLog(report, {}, { report.replace("\n", "\r\n") }, console::add).join())
         assertTrue(console.isEmpty())
     }
     @Test fun mismatchedCopyPrintsTheCompleteUnchangedReportOnce() {
         val console = mutableListOf<String>()
-        assertFalse(ClipboardReport.copyOrLog(report, {}, { report.dropLast(1) }, console::add))
+        assertFalse(ClipboardReport.copyOrLog(report, {}, { report.dropLast(1) }, console::add).join())
         assertEquals(listOf(report), console)
     }
     @Test fun failedClipboardWriteStillPrintsTheReportWithoutReadingTheClipboard() {
         val console = mutableListOf<String>(); var reads = 0
-        assertFalse(ClipboardReport.copyOrLog(report, { error("clipboard unavailable") }, { reads++; report }, console::add))
+        assertFalse(ClipboardReport.copyOrLog(report, { error("clipboard unavailable") }, { reads++; report }, console::add).join())
         assertEquals(0, reads); assertEquals(listOf(report), console)
     }
     @Test fun failedClipboardReadStillPrintsTheReport() {
         val console = mutableListOf<String>()
-        assertFalse(ClipboardReport.copyOrLog(report, {}, { error("clipboard unavailable") }, console::add))
+        assertFalse(ClipboardReport.copyOrLog(report, {}, { error("clipboard unavailable") }, console::add).join())
+        assertEquals(listOf(report), console)
+    }
+
+    @Test fun desktopFallbackCanRecoverANativeReadbackMismatch() {
+        val console = mutableListOf<String>()
+        val desktop = CompletableFuture<Boolean>()
+        val result = ClipboardReport.copyOrLog(report, {}, { "old clipboard" }, console::add) { received ->
+            assertEquals(report, received)
+            desktop
+        }
+        assertFalse(result.isDone)
+        desktop.complete(true)
+        assertTrue(result.join())
+        assertTrue(console.isEmpty())
+    }
+
+    @Test fun desktopFailureStillPreservesTheFullReport() {
+        val console = mutableListOf<String>()
+        val result = ClipboardReport.copyOrLog(report, {}, { "" }, console::add) {
+            CompletableFuture.failedFuture(IllegalStateException("desktop clipboard unavailable"))
+        }
+        assertFalse(result.join())
         assertEquals(listOf(report), console)
     }
 }

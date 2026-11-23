@@ -1,0 +1,17 @@
+ZPBW ClickGUI includes these third-party assets:
+
+Barlow Regular and SemiBold, from the Google Fonts repository:
+https://github.com/google/fonts/tree/main/ofl/barlow
+Unmodified fonts distributed under the SIL Open Font License 1.1.
+Regular upstream blob: bb3faec4e243e812b288fbfb9235b12ea781eee4
+SemiBold upstream blob: 7c974a4aa67c689a4b2a844b48f624cb4eeaa6bd
+See Barlow-OFL.txt.
+
+Google Material Icons, Settings (Outlined), Content Copy (Outlined) and Favorite:
+https://github.com/google/material-design-icons
+Settings upstream blob: ce2dc8da2b387f88954036f06d70cde4103ee619
+Content Copy upstream blob: a2e8cf1ae8298b8834559b0a6f211217d99f2c48
+Favorite upstream blob: c65bba382f5c9ac1926040a269013fde72aab7d0
+The original vectors in ui-source are unchanged. The game uses antialiased,
+white-on-transparent 96-pixel conversions of those assets.
+See Material-Icons-Apache-2.0.txt.

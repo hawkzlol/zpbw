@@ -44,10 +44,13 @@ object EtherwarpPredictor {
         val look = EtherwarpRaycast.direction(yaw, pitch)
         val level = mc.level ?: return null
         val hit = EtherwarpRaycast(level) { x, z -> if (level.hasChunk(x, z)) level.getChunk(x, z) else null }
-            .trace(start, start.add(look.scale(range)), captureTrace)
+            .trace(start, start.add(look.scale(range)), captureTrace, detailed = countSkips)
         val landing = if (hit.succeeded) hit.pos?.let { Vec3(it.x + 0.5, hit.landingFeetY!!.toDouble(), it.z + 0.5) } else null
-        val input = "origin=$position anchorOverride=${sourceOverride != null} eye=$eyeHeight bodyEye=${player.eyeHeight} eyePose=$eyePose playerPose=${player.pose} crouching=${player.isCrouching} shift=${player.isShiftKeyDown} keyShift=${mc.options.keyShift.isDown} effectiveSneak=$sneaking override=$sneakingOverride yaw=$yaw pitch=$pitch range=$range direction=double"
-        return EtherwarpRotationPrediction(hit.succeeded, hit.pos, landing, listOf(input) + hit.details,
+        val diagnostics = if (!countSkips) emptyList() else {
+            val input = "origin=$position anchorOverride=${sourceOverride != null} eye=$eyeHeight bodyEye=${player.eyeHeight} eyePose=$eyePose playerPose=${player.pose} crouching=${player.isCrouching} shift=${player.isShiftKeyDown} keyShift=${mc.options.keyShift.isDown} effectiveSneak=$sneaking override=$sneakingOverride yaw=$yaw pitch=$pitch range=$range direction=double"
+            listOf(input) + hit.details
+        }
+        return EtherwarpRotationPrediction(hit.succeeded, hit.pos, landing, diagnostics,
             hit.snapshot?.let { EtherwarpTrace(it, eyeHeight) })
     }
 
