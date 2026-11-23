@@ -12,10 +12,12 @@ class ZpbwLogTest {
         log.record("EXPERIMENTAL_STALE_SETTLEMENT generation=4 discarded=9")
         log.record("REPAIR_GENUINE_DRAIN_COMPLETE id=13")
         repeat(2000){log.record("PREPARED generation=$it")}
+        log.record("FIRST_INSTALL_SHOWN version=test")
         val report=log.snapshot()
         assertContains(report,"EXPERIMENTAL_STALL generation=3 reason=hold_limit holdAgeUs=750001 pending=2 retained=4")
         assertContains(report,"EXPERIMENTAL_STALE_SETTLEMENT generation=4 discarded=9")
         assertContains(report,"REPAIR_GENUINE_DRAIN_COMPLETE id=13")
+        assertTrue(report.indexOf("FIRST_INSTALL_SHOWN")<report.indexOf("Failures and cancellations"))
         assertTrue(report.toByteArray().size<=ZpbwLog.MAX_SNAPSHOT_BYTES)
     }
     @Test fun noisyTrafficIsAggregatedWithoutEvictingUsefulEvents() {
