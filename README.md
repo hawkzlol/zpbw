@@ -10,7 +10,7 @@ The goal is not to fake the server teleport or replace Minecraft's normal telepo
 
 The mod has been tested in a local server lab across different latencies, chained warps, interactions and recovery cases. That does not cover every server or combination of mods. It will remain actively maintained until this game no longer interests me, or I consider the mod to be in a strong enough state to leave as-is.
 
-Use `/zpbw` to see the available commands.
+Use `/zpbw` to open settings or `/zpbw help` to see the available commands.
 
 ## Installation
 
@@ -33,12 +33,21 @@ Every setting below is saved between sessions.
 
 | Command | What it does |
 | --- | --- |
-| `/zpbw` | Shows the command list. |
+| `/zpbw` | Opens the settings menu. |
+| `/zpbw help` | Shows the command list. |
 | `/zpbw on` / `/zpbw off` | Enables or disables prediction. |
 | `/zpbw nosneakdelay` or `/zpbw nsd` | Toggles NoSneakDelay. Add `on` or `off` to set it explicitly. |
 | `/zpbw timeout <ticks>` | Sets the timeout for new warps. Values are clamped to 2–20; the default is 20. |
 | `/zpbw chainmax [value]` | Shows the overlap limit, or saves a signed integer clamped to 1–5 (default 5). |
 | `/zpbw logs` | Copies session troubleshooting information to your clipboard, or prints it to the game console if clipboard access fails. |
+
+Under General, **Reduced Chat Logs** shows a short message for destination mismatches. **Disable Chat Logs** mutes all automatic ZPBW chat messages and takes precedence over reduced mode. Command replies and debug exports remain available.
+
+**Disable in Puzzles, Bosses & Similar** is enabled by default. It pauses new Blinkwarp predictions in Boulder, Teleport Maze, trap rooms, Maxor's phase, Glacite Mineshafts, Jungle Temple, Dojo and guest islands.
+
+**Overlay** highlights the landing block for an armed Etherwarp item. Enable **Show Always** to preview while holding an eligible item without sneaking. While a Blinkwarp is pending, the highlight previews the next jump from the predicted landing. Set the colors with the visual picker or enter `#RRGGBB` or `#RRGGBBAA`. You can also adjust opacity, outline width, depth, and block shape.
+
+**Sounds** lets you search and preview Minecraft sounds and adjust their volume and pitch. **Blinkwarp** plays the selected sound when the local prediction takes effect. **Play Sound on Failed Guesses.** also replaces a matching nearby server cue when no local sound played. **Etherwarp** waits for the server's matching sound.
 
 NoSneakDelay attempts to send sneak input earlier while preserving packet order. An early input already sent to the server must remain committed through its first natural input tick; movement-key changes during that interval can wait until the following sample. Once the commitment ends, current keys are sampled directly without replaying an older deferred snapshot.
 
@@ -66,7 +75,7 @@ With Java 25 installed:
 python tools/verify_dual_native.py
 ```
 
-This tree builds 1.0.3 independently for released Java 26.2 and 26.3 using Java 25. The command cleans, tests, builds and validates both native roots, then collects a matching immutable pair under `artifacts/native-pairs/<run-id>/`. Install only the JAR matching your exact Minecraft version: `zpbw-mc26.2-1.0.3.jar` or `zpbw-mc26.3-1.0.3.jar`. A collected build is **BUILT_UNQUALIFIED**, not runtime-qualified or released. See [native build and validation](docs/dual-native-1.0.3.md).
+This tree builds 1.0.4 independently for released Java 26.2 and 26.3 using Java 25. The command cleans, tests, builds and validates both native roots, then collects a matching immutable pair under `artifacts/native-pairs/<run-id>/`. Install only the JAR matching your exact Minecraft version: `zpbw-mc26.2-1.0.4.jar` or `zpbw-mc26.3-1.0.4.jar`. A collected build is **BUILT_UNQUALIFIED**, not runtime-qualified or released. See [native build and validation](docs/dual-native-1.0.3.md).
 
 See [validation and known limitations](docs/validation-1.0.3.md) for the release checks. Compilation alone is not functional verification.
 

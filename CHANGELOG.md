@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.4 (prerelease)
+
+- Open the ZPBW settings menu with `/zpbw` on Minecraft 26.2 and 26.3. Use `/zpbw help` for the command list.
+- Configure Blinkwarp, chain maximum, timeout and NoSneakDelay in the menu, and export debug logs from its footer.
+- Add optional Smooth Landings (Visual) to soften the small vertical camera hop after a Blinkwarp.
+- Keep the menu size and click targets independent of Minecraft's GUI Scale setting.
+- Add links to the GitHub repository and Issues in General, and an extra clipboard fallback for Windows and Linux desktops with X11 access.
+- Add Reduced Chat Logs and Disable Chat Logs settings. Debug exports remain available in either mode.
+- Pause new Blinkwarp predictions in restricted puzzles, boss phases and other areas by default. General can turn this safeguard off.
+- Add an Overlay page with next-target prediction during pending warps, a visual color picker with hex and opacity controls, and configurable outline width, depth and block shape.
+- Add a separate Sounds page with searchable Minecraft sounds, per-sound previews, volume and pitch controls, and a choice of Blinkwarp or server Etherwarp timing.
+- Let the overlay appear without sneaking and optionally replace matching server sounds when Blinkwarp did not play a local cue.
+- Fix native text entry on 26.3 and align labels with their descriptions.
+
+Rare snapbacks can still occur after rapid chained Etherwarps. If it happens, run `/zpbw logs` immediately and include the report when filing an issue.
+
 ## 1.0.3 - 2026-11-22
 
 ### Minecraft versions

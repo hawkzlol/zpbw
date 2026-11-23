@@ -8,6 +8,17 @@ import net.minecraft.network.chat.TextColor
 import kotlin.test.*
 
 class ZpbwMessagesTest {
+    @Test fun automaticChatRespectsBothPreferencesAndKeepsFullMessagesLazy() {
+        val timeout = { ZpbwMessages.timeout(20) }
+        assertEquals(timeout().string,
+            ZpbwMessages.automaticChat(false, false, false, timeout)?.string)
+        assertNull(ZpbwMessages.automaticChat(true, false, false) { error("Muted timeout was formatted") })
+        assertEquals("[ZPBW] Blinkwarp Prediction Failed!",
+            ZpbwMessages.automaticChat(true, false, true) { error("Detailed mismatch was formatted") }?.string)
+        for (reduced in listOf(false, true)) {
+            assertNull(ZpbwMessages.automaticChat(reduced, true, true) { error("Disabled notice was formatted") })
+        }
+    }
     private fun flattened(c: Component): List<Component> = listOf(c) + c.siblings.flatMap(::flattened)
     @Test fun suspendedPredictionHasAnExplicitPrefixedRecoveryInstruction() {
         val message = ZpbwMessages.recoverySuspended()
@@ -80,7 +91,7 @@ class ZpbwMessagesTest {
     @Test fun welcomeHasVersionAndClickableUnderlinedProjectLink() {
         val c=ZpbwMessages.welcome("1.0.0")
         assertContains(c.string,"You just installed ZPBW 1.0.0!")
-        assertContains(c.string,"To get started, run /zpbw to see all of the commands.")
+        assertContains(c.string,"To get started, run /zpbw to open settings or /zpbw help for commands.")
         val pieces=flattened(c)
         val installed=pieces.first { it.string=="You just installed ZPBW 1.0.0!\n" }
         assertTrue(installed.style.isBold)
@@ -88,7 +99,7 @@ class ZpbwMessagesTest {
         val command=pieces.first { it.string=="/zpbw" }
         assertEquals(TextColor.fromLegacyFormat(ChatFormatting.WHITE),command.style.color)
         assertFalse(command.style.isBold)
-        val continuation=pieces.first { it.string.startsWith(" to see all of the commands.") }
+        val continuation=pieces.first { it.string.startsWith(" to open settings or ") }
         assertEquals(TextColor.fromLegacyFormat(ChatFormatting.GREEN),continuation.style.color)
         assertFalse(continuation.style.isBold)
         assertEquals(c.string.lines().first().length,c.string.lines().last().length)

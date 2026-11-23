@@ -66,8 +66,9 @@ class TimeoutIntegrationTest {
         val dispatcher=CommandDispatcher<FabricClientCommandSource>(); ZpbwClient().registerCommands(dispatcher)
         assertEquals(listOf("zpbw"), dispatcher.root.children.map { it.name })
         val root = dispatcher.root.getChild("zpbw")
-        assertNotNull(root.command, "The bare command must show help")
-        assertEquals(setOf("on", "off", "nosneakdelay", "nsd", "timeout", "chainmax", "logs"), root.children.map { it.name }.toSet())
+        assertNotNull(root.command, "The bare command must open settings")
+        assertNotNull(root.getChild("help").command, "Help must remain executable as a subcommand")
+        assertEquals(setOf("help", "on", "off", "nosneakdelay", "nsd", "timeout", "chainmax", "logs"), root.children.map { it.name }.toSet())
         for (n in listOf(Int.MIN_VALUE, -1, 0, 1, 2, 20, 21, 30, Int.MAX_VALUE)) {
             val parsed=dispatcher.parse("zpbw timeout $n",null)
             assertTrue(parsed.exceptions.isEmpty()); assertFalse(parsed.reader.canRead())

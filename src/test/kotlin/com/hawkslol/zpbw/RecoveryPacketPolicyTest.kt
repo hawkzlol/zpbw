@@ -71,4 +71,38 @@ class RecoveryPacketPolicyTest {
         assertEquals(packets, replay)
         replay.forEachIndexed { i, packet -> assertSame(packets[i], packet) }
     }
+
+    @Test fun twoAndRollingThreeWarpsReleaseTheUnmodifiedFinalJournalForBothNativeContracts() {
+        for (contract in listOf(TestResponseContracts.PAIR, TestResponseContracts.COMBINED)) {
+            for (warps in 2..3) {
+                val ledger = ChainLedger<String, Packet<*>>(responseContract = contract)
+                ledger.configureMaximum(2)
+                fun issue(generation: Long) { ledger.add(generation, "warp$generation"); ledger.cut(generation) }
+                fun confirm(generation: Long, id: Int): List<Packet<*>> {
+                    ledger.genuine(generation, id)
+                    assertFailsWith<IllegalStateException> { ledger.settle(generation, id) }
+                    for (step in contract) ledger.response(id, step)
+                    return ledger.settle(generation, id)
+                }
+                issue(1); issue(2)
+                assertTrue(confirm(1, 86).isEmpty())
+                if (warps == 3) issue(3)
+                val packets = listOf<Packet<*>>(ServerboundSetCarriedItemPacket(2),
+                    ServerboundPlayerInputPacket(Input.EMPTY),
+                    ServerboundMovePlayerPacket.Pos(0.5, 72.0, 0.75, true, false),
+                    ServerboundClientTickEndPacket.INSTANCE, ServerboundContainerClosePacket(1))
+                packets.forEach { ledger.retain(it) }
+                if (warps == 3) {
+                    assertTrue(confirm(2, 87).isEmpty())
+                    assertEquals(packets.size, ledger.size)
+                }
+                val released = confirm(warps.toLong(), 85 + warps)
+                assertEquals(0, ledger.count)
+                assertEquals(packets.size, released.size)
+                released.forEachIndexed { index, packet -> assertSame(packets[index], packet) }
+                assertTrue(ledger.canAdd)
+            }
+        }
+    }
+
 }

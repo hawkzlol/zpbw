@@ -32,6 +32,16 @@ class ZpbwLogTest {
         assertFalse("PREPARED generation=0\n" in snapshot)
     }
 
+    @Test fun mismatchContextAndFollowingPositionsSurviveNoisyLifecycleTraffic() {
+        val log = ZpbwLog()
+        log.record("PREDICTION_MISMATCH_CONTEXT generation=33 rayOrigin=1,2,3")
+        log.record("PREDICTION_MISMATCH_FOLLOWUP generation=33 index=1 matchesGuess=true")
+        repeat(2_000) { log.record("PREPARED generation=$it") }
+        val snapshot = log.snapshot()
+        assertContains(snapshot, "PREDICTION_MISMATCH_CONTEXT generation=33 rayOrigin=1,2,3")
+        assertContains(snapshot, "PREDICTION_MISMATCH_FOLLOWUP generation=33 index=1 matchesGuess=true")
+    }
+
     @Test fun snapshotsAndOversizedUnicodeRecordsStayBounded() {
         val log = ZpbwLog()
         val detail = "界".repeat(100_000)
