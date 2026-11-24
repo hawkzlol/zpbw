@@ -13,7 +13,7 @@ internal class RecoveryPredictionFence<C : Any>(
     private var suspended = false
     private var noticePending = false
     private var reason: String? = null
-    private var remainingTicks = 0
+    private var elapsedTicks = 0
     private var handler: Any? = null
     private var responseIndex = 0
     private var invalidResponse = false
@@ -30,7 +30,7 @@ internal class RecoveryPredictionFence<C : Any>(
         suspended = false
         noticePending = false
         reason = null
-        remainingTicks = 0
+        elapsedTicks = 0
         receivedPositions = 0
         processedPositions = 0
         clearAuthority()
@@ -44,7 +44,7 @@ internal class RecoveryPredictionFence<C : Any>(
         suspended = true
         noticePending = true
         this.reason = reason.take(96)
-        remainingTicks = 20
+        elapsedTicks = 0
         clearAuthority()
         return true
     }
@@ -52,11 +52,10 @@ internal class RecoveryPredictionFence<C : Any>(
     fun isSuspended(connection: C?) = connection != null && owner?.get() === connection && suspended
     fun reason(connection: C?): String? = reason.takeIf { isSuspended(connection) }
 
-    /** Unresolved retirement, player/world replacement, or another native use during
-     * recovery starts a new quiet stabilization boundary. */
+    /** Unresolved retirement, replacement or an actually sent native use requires
+     * new genuine authority. Time alone never supplies that proof. */
     fun restart(connection: C?) {
         if (!isSuspended(connection)) return
-        remainingTicks = 20
         clearAuthority()
     }
 
@@ -88,12 +87,14 @@ internal class RecoveryPredictionFence<C : Any>(
 
     /** Counts existing completed client ticks, never creates a tick or sends anything. */
     fun nativeTick(connection: C?) {
-        if (isSuspended(connection) && remainingTicks > 0) remainingTicks--
+        if (isSuspended(connection) && elapsedTicks < Int.MAX_VALUE) elapsedTicks++
     }
 
     fun inputSampled(connection: C?) {
         if (isSuspended(connection) && authoritative) sampled = true
     }
+
+    fun awaitingFreshBoundary(connection: C?) = isSuspended(connection) && authoritative
 
     /** Netty only records ingress; it never touches player state or grants authority. */
     @Synchronized fun received(connection: C?) {
@@ -107,14 +108,29 @@ internal class RecoveryPredictionFence<C : Any>(
     }
 
     @Synchronized fun naturalTickEnd(connection: C?, noOutstandingWork: Boolean): Boolean {
-        if (!isSuspended(connection) || !noOutstandingWork || receivedPositions != processedPositions ||
-            remainingTicks != 0 || !authoritative || !sampled) return false
+        if (blocker(connection, noOutstandingWork) != "ready") return false
         suspended = false
         noticePending = false
         reason = null
         clearAuthority()
         return true
     }
+
+    @Synchronized fun blocker(connection: C?, noOutstandingWork: Boolean): String = when {
+        !isSuspended(connection) -> "not_suspended"
+        !noOutstandingWork -> "outstanding_state"
+        receivedPositions != processedPositions -> "incoming_position_queue"
+        handler != null -> "native_handler"
+        !authoritative -> "native_authority"
+        !sampled -> "fresh_input"
+        else -> "ready"
+    }
+
+    @Synchronized fun diagnostics(connection: C?): String =
+        if (!isSuspended(connection)) "suspended=false"
+        else "suspended=true reason=$reason elapsedTicks=$elapsedTicks authority=$authoritative sampled=$sampled " +
+            "handlerActive=${handler != null} responseSteps=$responseIndex/${responseContract.size} " +
+            "ingressPending=${receivedPositions - processedPositions}"
 
     private fun clearAuthority() {
         handler = null

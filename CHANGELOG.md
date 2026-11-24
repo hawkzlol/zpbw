@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.4 — 2026-11-24
+
+- Open the settings menu with `/zpbw`. It remembers the last tab and has an optimized Blinkwarp preset and help for chain maximum, timeout, and sounds on failed guesses.
+- Add a customizable Etherwarp overlay, sound previews and replacement sounds, Smooth Landings, and chat controls. The overlay draws above ordinary waypoints when Depth is off.
+- Resume Blinkwarp after server confirmation and the next native input boundary. Continued clicks no longer restart the old recovery wait. Debug reports retain more context for different kinds of issues.
+- Include experimental server lag compensation, enabled by default, and a setting that pauses prediction in restricted areas.
+
+Rare snapbacks remain possible during rapid chained Etherwarps. If one occurs, use `/zpbw logs` promptly and include the report when filing an issue.
+
 ## 1.0.4-pre2 (prerelease)
 
 - Add **General > Server Lag Compensation (Experimental)**, enabled by default, to attempt to prevent kicks during server stalls on both native versions. Explicit saved OFF choices are preserved.

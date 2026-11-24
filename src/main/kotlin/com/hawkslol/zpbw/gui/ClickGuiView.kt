@@ -11,11 +11,14 @@ internal interface ClickGuiCanvas {
     fun gradient(rect: GuiRect, stops: IntArray, vertical: Boolean)
     fun textWidth(value: String, size: Int, strong: Boolean = false): Int
     fun text(value: String, x: Int, y: Int, size: Int, color: Int, strong: Boolean = false)
-    fun centeredLabel(value: String, x: Int, centerY: Int, size: Int, color: Int, strong: Boolean = true)
+    fun centeredLabel(value: String, x: Int, centerY: Int, size: Int, color: Int, strong: Boolean = true,
+                      centerOnCapHeight: Boolean = false)
     fun icon(icon: GuiIcon, rect: GuiRect)
 }
 
-internal enum class GuiIcon(val texture: String) { SETTINGS("settings"), COPY("content_copy"), HEART("favorite") }
+internal enum class GuiIcon(val texture: String) {
+    SETTINGS("settings"), COPY("content_copy"), HEART("favorite"), RESET("reset")
+}
 
 internal object ClickGuiView {
     const val SCRIM = 0xA50C1520.toInt()
@@ -31,6 +34,12 @@ internal object ClickGuiView {
     private const val DISABLED = 0xFF8498AC.toInt()
     private const val BLUE = 0xFFA8D5F2.toInt()
     private const val WARNING = 0xFFF4C49E.toInt()
+    private val helpMessages = mapOf(
+        GuiAction.CHAIN_HELP to "The maximum number of Etherwarps you can perform while waiting for earlier ones to be confirmed.",
+        GuiAction.TIMEOUT_HELP to "How many server ticks to wait for an Etherwarp before attempting to resync.\n" +
+            "Allow an extra tick or two beyond your ping. For example, 200 ms is about 4 ticks, so set this to 5 or 6.",
+        GuiAction.SOUND_ON_FAILED_HELP to "Plays your sound even if a Blinkwarp didn't occur."
+    )
 
     fun draw(canvas: ClickGuiCanvas, page: GuiPage, values: ClickGuiValues, version: String,
              hover: GuiAction?, focus: GuiAction?, notice: String?, warning: Boolean,
@@ -70,13 +79,14 @@ internal object ClickGuiView {
                     GuiAction.TIMEOUT_DOWN, GuiAction.TIMEOUT_UP, hover)
                 chatSwitch("Smooth Landings (Visual)", "Softens the small vertical camera hop after a Blinkwarp.",
                     GuiAction.SMOOTH_LANDINGS, values.smoothLandings, hover)
+                button("Reset to Optimized Defaults", GuiAction.RESET_BLINKWARP, true, hover)
             }
             GuiPage.NO_SNEAK_DELAY -> {
                 heading("NoSneakDelay", "Safely send sneak input as early as possible.")
                 toggle(values.noSneakDelay, hover == GuiAction.TOGGLE)
             }
             GuiPage.GENERAL -> {
-                heading("General", "Chat, location safeguards, and project links.")
+                heading("General")
                 chatSwitch("Reduced Chat Logs", "Show a short message only when the destination differs.",
                     GuiAction.REDUCE_CHAT, values.reducedChatLogs, hover)
                 chatSwitch("Disable Chat Logs", "Mute all automatic ZPBW chat messages.", GuiAction.DISABLE_CHAT,
@@ -85,14 +95,14 @@ internal object ClickGuiView {
                     GuiAction.RESTRICT_LOCATIONS, values.disableInRestrictedLocations, hover)
                 chatSwitch("Server Lag Compensation (Experimental)", "Attempts to fix a kick that occurs during server stalls.",
                     GuiAction.EXPERIMENTAL_REPAIRS, values.experimentalRepairs, hover)
-                text("Run /zpbw help to see available commands.", CONTENT_LEFT, 278, 13, MUTED)
+                text("Run /zpbw help to see available commands.", CONTENT_LEFT, 264, 13, MUTED)
                 button("GitHub", GuiAction.GITHUB, true, hover)
                 button("Report Issues", GuiAction.GITHUB_ISSUES, true, hover)
                 val credit = "ZPBW, made with"
-                text(credit, CONTENT_LEFT, 335, 12, MUTED)
+                text(credit, CONTENT_LEFT, 321, 12, MUTED)
                 val heartX = CONTENT_LEFT + textWidth(credit, 12) + 4
-                icon(GuiIcon.HEART, GuiRect(heartX, 336, 12, 12))
-                text("by zhxwks", heartX + 16, 335, 12, MUTED)
+                icon(GuiIcon.HEART, GuiRect(heartX, 322, 12, 12))
+                text("by zhxwks", heartX + 16, 321, 12, MUTED)
             }
             GuiPage.OVERLAY -> overlay(values.overlay, hover)
             GuiPage.SOUND -> sound(values.overlay, picker, hover)
@@ -101,7 +111,15 @@ internal object ClickGuiView {
         }
         if (notice != null) text(notice, CONTENT_LEFT, 371, 12, if (warning) WARNING else MUTED)
         button("Copy debug logs", GuiAction.COPY_LOGS, true, hover)
-        if (focus != null && focus != GuiAction.SOUND_SEARCH && focus != GuiAction.COLOR_HEX) outline(focus.bounds, BLUE)
+        if (focus != null && focus != GuiAction.SOUND_SEARCH && focus != GuiAction.COLOR_HEX && !focus.isHelp) {
+            outline(focus.bounds, BLUE)
+        }
+        val helpActions = availableActions(page, values, picker).filter { it.isHelp }
+        for (help in helpActions) helpBadge(help.bounds, hover == help || focus == help)
+        val activeHelp = hover?.takeIf { it in helpActions } ?: focus?.takeIf { it in helpActions }
+        if (activeHelp != null) {
+            helpTooltip(activeHelp.bounds, helpMessages.getValue(activeHelp))
+        }
     }
 
     private fun ClickGuiCanvas.overlay(options: EtherwarpOptions, hover: GuiAction?) {
@@ -270,13 +288,14 @@ internal object ClickGuiView {
 
     private fun ClickGuiCanvas.overlaySwitch(label: String, action: GuiAction, enabled: Boolean, hover: GuiAction?,
                                              description: String? = null) {
-        rowLabel(label, action)
+        val rect = action.bounds
         if (description != null) {
-            val rect = action.bounds
-            centeredLabel(description, CONTENT_LEFT + textWidth(label, 15, true) + 12, rect.y + rect.height / 2,
-                13, MUTED, strong = false)
-        }
-        switch(action.bounds, enabled, hover == action)
+            val centerY = rect.y + rect.height / 2
+            centeredLabel(label, CONTENT_LEFT, centerY, 15, PRIMARY, centerOnCapHeight = true)
+            centeredLabel(description, CONTENT_LEFT + textWidth(label, 15, true) + 12, centerY,
+                13, MUTED, strong = false, centerOnCapHeight = true)
+        } else rowLabel(label, action)
+        switch(rect, enabled, hover == action)
     }
 
     private fun ClickGuiCanvas.slider(rect: GuiRect, fraction: Double) {
@@ -301,10 +320,10 @@ internal object ClickGuiView {
         }
     }
 
-    private fun ClickGuiCanvas.heading(title: String, summary: String) {
+    private fun ClickGuiCanvas.heading(title: String, summary: String? = null) {
         text(title, CONTENT_LEFT, 47, 24, PRIMARY, true)
-        text(summary, CONTENT_LEFT, 72, 14, MUTED)
-        divider(92)
+        if (summary != null) text(summary, CONTENT_LEFT, 72, 14, MUTED)
+        divider(if (summary == null) 78 else 92)
     }
 
     private fun ClickGuiCanvas.feature(label: String, action: GuiAction, selected: Boolean, hover: GuiAction?, size: Int = 13) {
@@ -355,6 +374,41 @@ internal object ClickGuiView {
         centeredLabel(summary, CONTENT_LEFT, centerY + 9, 13, MUTED, strong = false)
     }
 
+    private fun ClickGuiCanvas.helpBadge(rect: GuiRect, active: Boolean) {
+        box(rect, BLUE, 8)
+        if (!active) box(rect.inset(1), FIELD, 7)
+        val x = rect.x + (rect.width - textWidth("?", 12, true)) / 2
+        centeredLabel("?", x, rect.y + rect.height / 2, 12, if (active) PANEL else BLUE)
+    }
+
+    private fun ClickGuiCanvas.helpTooltip(anchor: GuiRect, message: String) {
+        val width = 306
+        val padding = 10
+        val fontSize = 13
+        val lineHeight = 17
+        val lines = mutableListOf<String>()
+        for (paragraph in message.lines()) {
+            var line = ""
+            for (word in paragraph.split(' ')) {
+                val next = if (line.isEmpty()) word else "$line $word"
+                if (line.isNotEmpty() && textWidth(next, fontSize) > width - padding * 2) {
+                    lines.add(line)
+                    line = word
+                } else line = next
+            }
+            lines.add(line)
+        }
+        val height = padding * 2 + lines.size * lineHeight
+        val x = minOf(anchor.right + 7, 624 - width)
+        val y = if (anchor.y + height <= 357) anchor.y else anchor.y - height - 6
+        val rect = GuiRect(x, y, width, height)
+        box(rect, BLUE, 6)
+        box(rect.inset(1), FIELD, 5)
+        for ((index, row) in lines.withIndex()) {
+            text(row, rect.x + padding, rect.y + padding + index * lineHeight, fontSize, PRIMARY)
+        }
+    }
+
     private fun ClickGuiCanvas.button(label: String, action: GuiAction, enabled: Boolean, hover: GuiAction?) {
         val rect = action.bounds
         box(rect, if (enabled) BORDER else LINE, 5)
@@ -363,9 +417,14 @@ internal object ClickGuiView {
             hover == action -> HOVER
             else -> FIELD
         }, 4)
-        if (action == GuiAction.COPY_LOGS) {
+        val buttonIcon = when (action) {
+            GuiAction.COPY_LOGS -> GuiIcon.COPY
+            GuiAction.RESET_BLINKWARP -> GuiIcon.RESET
+            else -> null
+        }
+        if (buttonIcon != null) {
             val start = rect.x + (rect.width - 20 - textWidth(label, 14, true)) / 2
-            icon(GuiIcon.COPY, GuiRect(start, rect.y + 6, 14, 14))
+            icon(buttonIcon, GuiRect(start, rect.y + 6, 14, 14))
             centeredLabel(label, start + 20, rect.y + rect.height / 2, 14, PRIMARY)
         } else {
             val link = action == GuiAction.GITHUB || action == GuiAction.GITHUB_ISSUES

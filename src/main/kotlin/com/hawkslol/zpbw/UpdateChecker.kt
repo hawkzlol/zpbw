@@ -88,7 +88,9 @@ class UpdateChecker(
             ?: return UpdateCheckResult(UpdateCheckStatus.INVALID_VERSION)
         if (remote <= local) return UpdateCheckResult(UpdateCheckStatus.CURRENT)
         val version = tag.removePrefix("v")
-        if (tag != "v$version") return UpdateCheckResult(UpdateCheckStatus.NO_COMPATIBLE_ASSETS)
+        // v1.0.4 is the preserved first prerelease. Only its stable successor uses the unprefixed tag.
+        val stable104 = tag == "1.0.4" && !prerelease
+        if (tag != "v$version" && !stable104) return UpdateCheckResult(UpdateCheckStatus.NO_COMPATIBLE_ASSETS)
         val assets = NATIVE_TARGETS.map { target ->
             val name = "zpbw-mc$target-$version.jar"
             val asset = root.assets.filter { it.name == name }.singleOrNull()

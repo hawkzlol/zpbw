@@ -1,5 +1,5 @@
 {
-  "productVersion": "1.0.4-pre2",
+  "productVersion": "1.0.4",
   "modId": "zpbw",
   "java": 25,
   "kotlin": "2.4.10",
@@ -38,12 +38,14 @@
         "kotlin/com/hawkslol/zpbw/nativebridge/NativeTextFocus.kt",
         "java/com/hawkslol/zpbw/mixin/ZpbwSneakSampleMixin.java",
         "java/com/hawkslol/zpbw/mixin/ZpbwSourceTickMixin.java",
-        "java/com/hawkslol/zpbw/mixin/ZpbwTeleportMixin.java"
+        "java/com/hawkslol/zpbw/mixin/ZpbwTeleportMixin.java",
+        "java/com/hawkslol/zpbw/mixin/ZpbwOverlayPriorityMixin.java"
       ],
       "replacements": [
         "java/com/hawkslol/zpbw/mixin/ZpbwSneakSampleMixin.java",
         "java/com/hawkslol/zpbw/mixin/ZpbwSourceTickMixin.java",
-        "java/com/hawkslol/zpbw/mixin/ZpbwTeleportMixin.java"
+        "java/com/hawkslol/zpbw/mixin/ZpbwTeleportMixin.java",
+        "java/com/hawkslol/zpbw/mixin/ZpbwOverlayPriorityMixin.java"
       ]
     }
   }

@@ -93,6 +93,9 @@ object ZpbwRuntime {
     private var recoveringUntil = 0L
     private var recoveryAdmissionReady = false
     private val recoveryFence = RecoveryPredictionFence<Connection>()
+    private var lastRecoveryBlockReason: String? = null
+    private fun recoveryBoundaryPending() = mode == Mode.REPLAY && chain.count == 0 && recoveryBarrier == null &&
+        recoveryFence.awaitingFreshBoundary(connected)
     private data class RecoveryBarrier(val owner: Pending, val seed: Pose, var authority: Pose,
                                        var receivedTeleport: Boolean = false, var admissionProof: Boolean = true)
     private var recoveryBarrier: RecoveryBarrier? = null
@@ -211,6 +214,29 @@ object ZpbwRuntime {
     }
 
     fun chainMaximum(): Int = chain.maximum
+
+    internal fun resetBlinkwarpToOptimizedDefaults(): Boolean {
+        check(mc.isSameThread)
+        val preset = settingsSnapshot().copy(enabled = true, chainMax = 3, timeoutTicks = 8, smoothLandings = false)
+        try {
+            settingsStore.saveStrict(preset)
+        } catch (failure: Exception) {
+            configErrors++
+            event("BLINKWARP_DEFAULTS_SAVE_FAILED type=${failure.javaClass.simpleName}")
+            return false
+        }
+        if (mode != Mode.REPLAY) {
+            invalidateRecoveryAdmission()
+            observations.clear()
+            mode = Mode.REPLAY
+        }
+        chain.configureMaximum(preset.chainMax)
+        timeoutTicks = preset.timeoutTicks
+        SmoothLandings.configure(preset.smoothLandings)
+        event("BLINKWARP_DEFAULTS_APPLIED enabled=${preset.enabled} chainmax=${preset.chainMax} timeoutTicks=$timeoutTicks smoothLandings=${preset.smoothLandings}")
+        return true
+    }
+
     internal fun configureExperimentalRepairs(enabled: Boolean): Boolean {
         check(mc.isSameThread)
         try { settingsStore.saveStrict(settingsSnapshot().copy(experimentalRepairs = enabled)) }
@@ -460,14 +486,15 @@ object ZpbwRuntime {
             queuedUse = queueInput("use", false) { mc.gameMode!!.useItem(local, hand) }
             return true
         }
-        if (recoveryFence.isSuspended(stream)) return false // Native gameplay continues without new speculation.
+        val recoveryBoundary = recoveryBoundaryPending()
+        if (recoveryFence.isSuspended(stream) && !recoveryBoundary) return false
         if (!stream.isConnected || local.isPassenger ||
             local.isFallFlying || local.isInWater || local.isInLava || !local.isAlive || mc.gui.screen() != null) {
             recover("use_outside_envelope"); return false
         }
         if (mode != Mode.REPLAY && chain.count > 0) recover("vanilla_use_after_off")
-        // Unresolved work remains vanilla until native authority, a bounded stabilization
-        // period and its fresh input/TickEnd boundary restore prediction admission.
+        // Unresolved work remains native until genuine authority and its following
+        // fresh input/TickEnd boundary restore prediction admission.
         // Server has not received held intermediate displacement. Dependent rays start at the
         // preceding predicted landing, never at an unsent advanced client position.
         val anchor = if (mode == Mode.REPLAY) chain.tail?.value?.target else null
@@ -479,6 +506,12 @@ object ZpbwRuntime {
             predicted.diagnostics.forEach { event("PREDICTION_RAY attempt=$attempt nextGeneration=${generation + 1} pending=${chain.count} $it") }
         }
         val unshifted = predicted?.takeIf { it.succeeded }?.landingFeetPosition?.add(0.0, 0.05, 0.0)
+        if (recoveryBoundary) {
+            if (unshifted == null) return false
+            queuedUse = queueInput("warp_use", true) { mc.gameMode!!.useItem(local, hand) }
+            event("RECOVERY_CLICK_QUEUED kind=warp_use queued=${waitingInputs.size}")
+            return true
+        }
         if (unshifted == null && dispatchingInput?.warp == true) {
             cancelInputDispatch("queued_target_changed")
             queuedUse = true
@@ -641,16 +674,28 @@ object ZpbwRuntime {
                 }
                 event("RECOVERY_INPUT_READY")
             }
-            val clean = handling == null && recoveryBarrier == null && chain.count == 0 &&
-                !recoveryResumePending && waitingInputs.isEmpty() && !bypass && !externalPredictionActive() &&
+            // Unissued waiting clicks have no server effects. They must not deadlock
+            // admission; dispatch remains blocked until this original boundary leaves.
+            val clean = handling == null && recoveryBarrier == null && chain.count == 0 && chain.size == 0 && !chain.nativeFallback &&
+                !recoveryResumePending && !bypass && !externalPredictionActive() &&
                 connection === mc.connection?.connection && mc.level === world &&
                 mc.player?.let { it === sessionPlayer && it.isAlive && it.x.isFinite() && it.y.isFinite() &&
                     it.z.isFinite() && it.yRot.isFinite() && it.xRot.isFinite() } == true &&
                 mc.gui.screen() == null && mc.gui.overlay() == null
+            val recoveryBefore = if (recoveryFence.isSuspended(connection)) recoveryFence.diagnostics(connection) else null
             if (recoveryFence.naturalTickEnd(connection, clean)) {
                 recoveringUntil = 0L
                 recoveryAdmissionReady = true
-                event("RECOVERY_PREDICTION_RESUMED freshConnection=false nativeAuthority=true")
+                lastRecoveryBlockReason = null
+                event("RECOVERY_PREDICTION_RESUMED freshConnection=false nativeAuthority=true queued=${waitingInputs.size} $recoveryBefore")
+            } else if (recoveryFence.isSuspended(connection)) {
+                val reason = recoveryFence.blocker(connection, clean)
+                if (reason != lastRecoveryBlockReason) {
+                    lastRecoveryBlockReason = reason
+                    event("RECOVERY_WAIT wait=$reason pending=${chain.count} retained=${chain.size} queued=${waitingInputs.size} $recoveryBefore")
+                }
+            } else {
+                lastRecoveryBlockReason = null
             }
         }
         if (rotationResponse) {
@@ -658,7 +703,7 @@ object ZpbwRuntime {
             return // No source cut, rollback-pose change or ledger response step.
         }
         if (packet is ServerboundUseItemOnPacket || packet is ServerboundUseItemPacket)
-            recoveryFence.restart(connection) // Require quiet stabilization after the latest native use, not the first failure.
+            recoveryFence.restart(connection) // An actual native use needs fresh authority; unissued clicks do not.
         if (externalPredictionActive()) return
         if (chain.nativeFallback) return // Sent history above remains current; no speculative source/aim work below.
         // A real native use outside a prepared generation can create a new future
@@ -1141,7 +1186,7 @@ object ZpbwRuntime {
     @JvmStatic fun dispatchWaitingInput() {
         if (!mc.isSameThread || externalPredictionActive()) return
         attach(); repairStalledPrediction(); drainTimeouts(); expireWaitingInputs()
-        if (recoveryBarrier != null || recoveryResumePending) return
+        if (recoveryBarrier != null || recoveryResumePending || recoveryFence.isSuspended(connected)) return
         if (handling != null || bypass || dispatchingInput != null || inputDispatchedThisTick) return
         val next = waitingInputs.firstOrNull() ?: return
         if (next.warp && positionReportPending()) return
@@ -1187,7 +1232,7 @@ object ZpbwRuntime {
      * rather than returning a synthetic SUCCESS from its first block-use step. */
     @JvmStatic fun deferUseClick(): Boolean {
         if (externalPredictionActive()) return false
-        if (bypass || dispatchingInput != null || !mc.isSameThread || chain.nativeFallback || (chain.count == 0 && waitingInputs.isEmpty() && !inputDispatchedThisTick && !recoveryResumePending && !positionReportPending())) return false
+        if (bypass || dispatchingInput != null || !mc.isSameThread || chain.nativeFallback || (chain.count == 0 && waitingInputs.isEmpty() && !inputDispatchedThisTick && !recoveryResumePending && !positionReportPending() && !recoveryBoundaryPending())) return false
         val player = mc.player ?: return false
         val level = mc.level ?: return false
         val game = mc.gameMode ?: return false
@@ -1203,7 +1248,7 @@ object ZpbwRuntime {
             EtherwarpPredictor.predictCurrentEtherwarpForRotation(player.yRot, player.xRot, chain.tail?.value?.target,
                 sneakingOverride = NoSneakDelay.sneakForPrediction())?.succeeded == true
         val positionPending = warpClick && positionReportPending()
-        if (warpClick && !positionPending && recoveryBarrier == null && !recoveryResumePending && chain.canAdd && waitingInputs.isEmpty() && !inputDispatchedThisTick) return false
+        if (warpClick && !positionPending && recoveryBarrier == null && !recoveryResumePending && chain.canAdd && waitingInputs.isEmpty() && !inputDispatchedThisTick && !recoveryBoundaryPending()) return false
         val main = player.mainHandItem.copy()
         val off = player.offhandItem.copy()
         val state = block?.let { level.getBlockState(it.blockPos) }
@@ -1535,7 +1580,7 @@ object ZpbwRuntime {
             "Version: ${ZpbwClient.version}\nCaptured: ${java.time.Instant.now()}\n" +
             "Platform: ${bounded(System.getProperty("os.name", "unknown"))}; Java: ${bounded(System.getProperty("java.version", "unknown"))}\n" +
             "Session: $environment; Minecraft: ${NativeIdentity.TARGET}\nSettings: enabled=${mode == Mode.REPLAY}, noSneakDelay=${NoSneakDelay.enabled}, chainMax=${chain.maximum}, timeoutTicks=$timeoutTicks, experimentalRepairs=$experimentalRepairs, firstInstall=$firstInstall, reducedChatLogs=$reducedChatLogs, disableChatLogs=$disableChatLogs\n" +
-            "State: ${status()}\nServer lag compensation: enabled=$experimentalRepairs nativeFallback=${chain.nativeFallback} repairRecovery=$repairRecovery ${stallGuard.diagnostics(connected, System.nanoTime(), chain.head?.value?.repairStamp)}\nUpdate check: ${updateChecker.status}\nMods: $mods\n" +
+            "State: ${status()}\nRecovery: ${recoveryFence.diagnostics(connected)} queued=${waitingInputs.size} inputBoundaryPending=$recoveryResumePending\nServer lag compensation: enabled=$experimentalRepairs nativeFallback=${chain.nativeFallback} repairRecovery=$repairRecovery ${stallGuard.diagnostics(connected, System.nanoTime(), chain.head?.value?.repairStamp)}\nUpdate check: ${updateChecker.status}\nMods: $mods\n" +
             "Contains local positions, timings and mod versions. No chat, server address, account details or raw packet payloads are collected.\n\n" + log.snapshot()
     }
     private fun attach(stream: Connection? = mc.connection?.connection) {

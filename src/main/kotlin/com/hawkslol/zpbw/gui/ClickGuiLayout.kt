@@ -37,15 +37,17 @@ internal enum class GuiAction(val bounds: GuiRect) {
     NO_SNEAK_DELAY(GuiRect(11, 137, ClickGuiViewport.SIDEBAR_WIDTH - 18, 28)),
     GENERAL(GuiRect(11, 364, ClickGuiViewport.SIDEBAR_WIDTH - 22, 28)),
     TOGGLE(GuiRect(578, 103, 46, 20)),
+    CHAIN_HELP(GuiRect(273, 140, 16, 16)),
     CHAIN_DOWN(GuiRect(519, 144, 24, 24)),
     CHAIN_UP(GuiRect(600, 144, 24, 24)),
+    TIMEOUT_HELP(GuiRect(273, 184, 16, 16)),
     TIMEOUT_DOWN(GuiRect(519, 188, 24, 24)),
     TIMEOUT_UP(GuiRect(600, 188, 24, 24)),
     SMOOTH_LANDINGS(GuiRect(578, 232, 46, 20)),
-    REDUCE_CHAT(GuiRect(578, 108, 46, 20)),
-    DISABLE_CHAT(GuiRect(578, 152, 46, 20)),
-    RESTRICT_LOCATIONS(GuiRect(578, 196, 46, 20)),
-    EXPERIMENTAL_REPAIRS(GuiRect(578, 240, 46, 20)),
+    REDUCE_CHAT(GuiRect(578, 94, 46, 20)),
+    DISABLE_CHAT(GuiRect(578, 138, 46, 20)),
+    RESTRICT_LOCATIONS(GuiRect(578, 182, 46, 20)),
+    EXPERIMENTAL_REPAIRS(GuiRect(578, 226, 46, 20)),
     OVERLAY_TOGGLE(GuiRect(578, 98, 46, 20)),
     SHOW_ALWAYS(GuiRect(578, 124, 46, 20)),
     SUCCESS_FILL(GuiRect(512, 151, 112, 21)),
@@ -64,6 +66,7 @@ internal enum class GuiAction(val bounds: GuiRect) {
     SOUND_VOLUME(GuiRect(435, 257, 189, 22)),
     SOUND_PITCH(GuiRect(435, 296, 189, 22)),
     SOUND_ON_FAILED(GuiRect(578, 330, 46, 20)),
+    SOUND_ON_FAILED_HELP(GuiRect(360, 332, 16, 16)),
     BACK(GuiRect(540, 319, 84, 26)),
     COLOR_PLANE(GuiRect(151, 111, 249, 177)),
     COLOR_HUE(GuiRect(415, 111, 19, 177)),
@@ -85,10 +88,13 @@ internal enum class GuiAction(val bounds: GuiRect) {
     PREVIEW_3(GuiRect(554, 221, 70, 23)),
     PREVIEW_4(GuiRect(554, 249, 70, 23)),
     PREVIEW_5(GuiRect(554, 277, 70, 23)),
-    GITHUB(GuiRect(151, 296, 90, 26)),
-    GITHUB_ISSUES(GuiRect(249, 296, 96, 26)),
+    GITHUB(GuiRect(151, 282, 90, 26)),
+    GITHUB_ISSUES(GuiRect(249, 282, 96, 26)),
+    RESET_BLINKWARP(GuiRect(416, 323, 208, 26)),
     COPY_LOGS(GuiRect(482, 365, 142, 26)),
-    CLOSE(GuiRect(601, 5, 30, 28))
+    CLOSE(GuiRect(601, 5, 30, 28));
+
+    val isHelp get() = this == CHAIN_HELP || this == TIMEOUT_HELP || this == SOUND_ON_FAILED_HELP
 }
 
 internal data class ClickGuiValues(
@@ -140,11 +146,14 @@ internal fun availableActions(page: GuiPage, values: ClickGuiValues, picker: Gui
     add(GuiAction.GENERAL)
     if (page == GuiPage.BLINKWARP || page == GuiPage.NO_SNEAK_DELAY) add(GuiAction.TOGGLE)
     if (page == GuiPage.BLINKWARP) {
+        add(GuiAction.CHAIN_HELP)
         if (values.chainMax > 1) add(GuiAction.CHAIN_DOWN)
         if (values.chainMax < 5) add(GuiAction.CHAIN_UP)
+        add(GuiAction.TIMEOUT_HELP)
         if (values.timeoutTicks > 2) add(GuiAction.TIMEOUT_DOWN)
         if (values.timeoutTicks < 20) add(GuiAction.TIMEOUT_UP)
         add(GuiAction.SMOOTH_LANDINGS)
+        add(GuiAction.RESET_BLINKWARP)
     }
     if (page == GuiPage.GENERAL) {
         add(GuiAction.REDUCE_CHAT)
@@ -164,7 +173,10 @@ internal fun availableActions(page: GuiPage, values: ClickGuiValues, picker: Gui
         GuiPage.SOUND -> {
             addAll(listOf(GuiAction.SOUND_TOGGLE, GuiAction.SOUND_TIMING, GuiAction.PICK_SOUND,
                 GuiAction.PREVIEW_SOUND, GuiAction.SOUND_VOLUME, GuiAction.SOUND_PITCH))
-            if (values.overlay.soundTiming == EtherwarpSoundTiming.BLINKWARP) add(GuiAction.SOUND_ON_FAILED)
+            if (values.overlay.soundTiming == EtherwarpSoundTiming.BLINKWARP) {
+                add(GuiAction.SOUND_ON_FAILED)
+                add(GuiAction.SOUND_ON_FAILED_HELP)
+            }
         }
         GuiPage.COLOR -> {
             addAll(colorControls)

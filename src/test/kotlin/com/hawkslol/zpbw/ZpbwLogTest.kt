@@ -6,6 +6,62 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.*
 
 class ZpbwLogTest {
+    @Test fun realNativeOccurrencePrefixesPreservePacketKindCounters() {
+        val log=ZpbwLog()
+        log.record("NETTY_ADMITTED occurrence=2465 action=null ServerboundClientTickEndPacket")
+        log.record("NETTY_ADMITTED occurrence=2467 action=19 Pos xyz=1,2,3 yaw=NaN pitch=NaN")
+        log.record("NETTY_ADMITTED occurrence=null action=null Accept id=3")
+        log.record("SEND_REQUEST occurrence=2470 action=null kind=Pos xyz=1,2,3")
+        log.record("SEND_REQUEST occurrence=2471 action=20 kind=Use sequence=42")
+        val report=log.snapshot()
+        assertContains(report,"NETTY_ADMITTED:ServerboundClientTickEndPacket=1")
+        assertContains(report,"NETTY_ADMITTED:Pos=1");assertContains(report,"NETTY_ADMITTED:Accept=1")
+        assertContains(report,"SEND_REQUEST:Pos=1");assertContains(report,"SEND_REQUEST:Use=1")
+        assertFalse("NETTY_ADMITTED:detail=" in report);assertFalse("SEND_REQUEST:detail=" in report)
+    }
+    @Test fun unrelatedDomainsAndIssueContextsSurviveRepetitiveGeometryDiagnostics() {
+        val log=ZpbwLog()
+        log.record("MODE REPLAY")
+        log.record("INPUT_QUEUED kind=warp_click capture=17")
+        log.record("NETTY_ADMITTED Pos xyz=1,2,3")
+        log.record("MISMATCH generation=8 reason=position_mismatch")
+        log.record("RECOVERY_WAIT wait=fresh_input")
+        log.record("RECOVERY_PREDICTION_RESUMED nativeAuthority=true")
+        repeat(2000){log.record("PREDICTION_RAY attempt=$it step=voxel")}
+        val report=log.snapshot()
+        assertContains(report,"MODE REPLAY");assertContains(report,"INPUT_QUEUED kind=warp_click capture=17")
+        assertContains(report,"RECOVERY_WAIT wait=fresh_input")
+        assertContains(report,"Issue context: MISMATCH")
+        assertContains(report,"MISMATCH generation=8 reason=position_mismatch")
+        assertContains(report,"PREDICTION_RAY=2000")
+        assertContains(report,"NETTY_ADMITTED:Pos=1")
+        assertContains(report,"Chronological non-wire tail")
+    }
+    @Test fun repetitiveOneIssueDoesNotDisplaceOtherIssueTypesAndWireLossIsExplicit() {
+        val log=ZpbwLog()
+        log.record("TIMEOUT generation=1 ticks=20")
+        repeat(1000){log.record("MISMATCH generation=$it")}
+        repeat(1000){log.record("NETTY_ADMITTED Pos xyz=1,2,3")}
+        val report=log.snapshot()
+        assertContains(report,"Issue context: TIMEOUT")
+        assertContains(report,"Issue context: MISMATCH")
+        assertContains(report,"TIMEOUT=1");assertContains(report,"MISMATCH=1000")
+        assertContains(report,"wire=968")
+        assertTrue(report.toByteArray().size<=ZpbwLog.MAX_SNAPSHOT_BYTES)
+    }
+    @Test fun everyDomainCountersAndEightUnicodeIssueContextsRemainBounded() {
+        val log=ZpbwLog();val text="界".repeat(1000)
+        for(event in listOf("MISMATCH","FALLBACK","TIMEOUT","NATIVE_HANDLER_ABORTED","EXPERIMENTAL_STALL",
+            "EXPERIMENTAL_STALE_SETTLEMENT","RECOVERY_NATIVE_OWNERSHIP_RETIRED","INPUT_TIMEOUT")) {
+            repeat(150){log.record("MODE $text");log.record("INPUT_QUEUED $text");log.record("RECOVERY_WAIT $text")
+                log.record("PREDICTION_RAY $text");log.record("NETTY_ADMITTED Pos $text");log.record("$event $text")}
+        }
+        repeat(200){log.record("TYPE_${it} value=test")}
+        val report=log.snapshot()
+        assertTrue(report.toByteArray().size<=ZpbwLog.MAX_SNAPSHOT_BYTES,report.toByteArray().size.toString())
+        assertContains(report,"OTHER=");assertContains(report,"context clipped; logSeq=")
+        assertContains(report,"Issue context: MISMATCH");assertContains(report,"Issue context: INPUT_TIMEOUT")
+    }
     @Test fun lagCompensationTriggerAndDrainSurviveNoisyLifecycleTraffic() {
         val log=ZpbwLog()
         log.record("EXPERIMENTAL_STALL generation=3 reason=hold_limit holdAgeUs=750001 pending=2 retained=4")

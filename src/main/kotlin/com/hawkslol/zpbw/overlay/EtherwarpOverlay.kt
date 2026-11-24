@@ -33,6 +33,11 @@ internal object EtherwarpOverlay {
                              val sneaking: Boolean, val showAlways: Boolean, val item: ItemStack)
     private var previous: Query? = null
     private var lastResult: EtherwarpRotationPrediction? = null
+    private var topPriorityGeometry = false
+    internal const val PRIORITY_ORDER = Int.MAX_VALUE
+
+    @JvmStatic fun resetPriorityFrame() { topPriorityGeometry = false }
+    @JvmStatic fun requestsTopPriorityPass() = topPriorityGeometry
     private val depthFill by lazy { renderType(false, true) }
     private val unoccludedFill by lazy { renderType(false, false) }
     private val depthLines by lazy { renderType(true, true) }
@@ -46,6 +51,7 @@ internal object EtherwarpOverlay {
     fun clear() {
         previous = null
         lastResult = null
+        resetPriorityFrame()
     }
 
     private fun render(context: LevelRenderContext) {
@@ -83,13 +89,14 @@ internal object EtherwarpOverlay {
         val offset = Vec3(target.x - eye.x, target.y - eye.y, target.z - eye.z)
         val relative = AABB(0.0, 0.0, 0.0, 1.0, 1.0, 1.0).move(offset).inflate(0.002)
         val collector = context.submitNodeCollector()
-        if (drawFill) submit(collector, poseStack, if (options.depth) depthFill else unoccludedFill) { pose, vertices ->
+        topPriorityGeometry = !options.depth
+        if (drawFill) submit(collector, poseStack, if (options.depth) depthFill else unoccludedFill, options.depth) { pose, vertices ->
             if (shape == null) emitFaces(pose, vertices, relative, fill)
             else shape.forAllBoxes { x0, y0, z0, x1, y1, z1 ->
                 emitFaces(pose, vertices, AABB(x0, y0, z0, x1, y1, z1).move(offset).inflate(0.002), fill)
             }
         }
-        if (drawOutline) submit(collector, poseStack, if (options.depth) depthLines else unoccludedLines) { pose, vertices ->
+        if (drawOutline) submit(collector, poseStack, if (options.depth) depthLines else unoccludedLines, options.depth) { pose, vertices ->
             val width = options.lineWidth.toFloat()
             if (shape == null) emitEdges(pose, vertices, relative, outline, width)
             else shape.forAllEdges { x0, y0, z0, x1, y1, z1 ->
@@ -104,10 +111,12 @@ internal object EtherwarpOverlay {
         }
     }
 
-    private fun submit(collector: SubmitNodeCollector, stack: PoseStack, type: RenderType,
+    private fun submit(collector: SubmitNodeCollector, stack: PoseStack, type: RenderType, depth: Boolean,
                        draw: SubmitNodeCollector.CustomGeometryRenderer) {
-        // The native always-on-top pass may be skipped unless vanilla produced its own gizmos.
-        (collector as FabricOrderedSubmitNodeCollector).submitCustom(SubmitRenderPhases.AFTER_TERRAIN,
+        // Final native phase + final order covers ordinary through-wall world annotations.
+        // Depth mode keeps terrain depth; the final pass clears that attachment in vanilla.
+        (collector.order(PRIORITY_ORDER) as FabricOrderedSubmitNodeCollector).submitCustom(
+            if (depth) SubmitRenderPhases.AFTER_TERRAIN else SubmitRenderPhases.ALWAYS_ON_TOP,
             CustomFeatureRenderer.Submit(stack.last().copy(), type, draw))
     }
 

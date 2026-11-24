@@ -75,10 +75,15 @@ internal object ClickGuiRaster {
             graphics.drawString(value, x.toFloat(), y + size * 0.84f)
         }
 
-        override fun centeredLabel(value: String, x: Int, centerY: Int, size: Int, color: Int, strong: Boolean) {
-            val glyphs = font(size, strong).createGlyphVector(graphics.fontRenderContext, value)
+        override fun centeredLabel(value: String, x: Int, centerY: Int, size: Int, color: Int, strong: Boolean,
+                                   centerOnCapHeight: Boolean) {
+            val face = font(size, strong)
+            val context = graphics.fontRenderContext
+            val glyphs = face.createGlyphVector(context, value)
+            // Descenders in a long description shouldn't shift its capitals above the adjacent label.
+            val bounds = if (centerOnCapHeight) face.createGlyphVector(context, "H").visualBounds else glyphs.visualBounds
             graphics.color = Color(color, true)
-            graphics.drawGlyphVector(glyphs, x.toFloat(), (centerY - glyphs.visualBounds.centerY).toFloat())
+            graphics.drawGlyphVector(glyphs, x.toFloat(), (centerY - bounds.centerY).toFloat())
         }
 
         override fun icon(icon: GuiIcon, rect: GuiRect) {

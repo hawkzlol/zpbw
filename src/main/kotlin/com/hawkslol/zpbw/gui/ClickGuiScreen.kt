@@ -28,7 +28,8 @@ import java.net.URI
 import kotlin.math.roundToInt
 
 internal class ClickGuiScreen : Screen(Component.literal("ZPBW Settings")) {
-    private var page = GuiPage.BLINKWARP
+    private var page = categoryMemory.category
+        set(value) { field = value; categoryMemory.remember(value) }
     private var focus: GuiAction? = null
         set(value) {
             val hadTextFocus = isEditor(field)
@@ -255,10 +256,12 @@ internal class ClickGuiScreen : Screen(Component.literal("ZPBW Settings")) {
     }
 
     private fun activate(action: GuiAction, values: ClickGuiValues) {
+        if (action.isHelp) return
         notice = null
         warning = false
         val previousPage = page
         when (action) {
+            GuiAction.CHAIN_HELP, GuiAction.TIMEOUT_HELP, GuiAction.SOUND_ON_FAILED_HELP -> Unit
             GuiAction.OVERLAY -> page = GuiPage.OVERLAY
             GuiAction.BLINKWARP -> page = GuiPage.BLINKWARP
             GuiAction.NO_SNEAK_DELAY -> page = GuiPage.NO_SNEAK_DELAY
@@ -293,6 +296,10 @@ internal class ClickGuiScreen : Screen(Component.literal("ZPBW Settings")) {
             GuiAction.SMOOTH_LANDINGS -> if (!ZpbwRuntime.configureSmoothLandings(!values.smoothLandings)) {
                 warning = true
                 notice = "Could not save Smooth Landings (Visual)."
+            }
+            GuiAction.RESET_BLINKWARP -> {
+                warning = !ZpbwRuntime.resetBlinkwarpToOptimizedDefaults()
+                notice = if (warning) "Could not save optimized Blinkwarp defaults." else "Optimized Blinkwarp defaults applied."
             }
             GuiAction.EXPERIMENTAL_REPAIRS -> if (!ZpbwRuntime.configureExperimentalRepairs(!values.experimentalRepairs)) {
                 warning = true
@@ -448,6 +455,7 @@ internal class ClickGuiScreen : Screen(Component.literal("ZPBW Settings")) {
     }
 
     companion object {
+        private val categoryMemory = GuiCategoryMemory()
         private fun isEditor(action: GuiAction?) = action == GuiAction.SOUND_SEARCH || action == GuiAction.COLOR_HEX
         private val HEX_INPUT = Regex("#?[0-9a-fA-F]{0,8}")
         private val SOUND_QUERY = Regex("[A-Za-z0-9:._/ -]{0,80}")

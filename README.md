@@ -16,7 +16,7 @@ Use `/zpbw` to open settings or `/zpbw help` to see the available commands.
 
 ## Installation
 
-Download **[ZPBW 1.0.3](https://github.com/hawkzlol/zpbw/releases/tag/v1.0.3)** from GitHub Releases.
+Download **[ZPBW 1.0.4](https://github.com/hawkzlol/zpbw/releases/tag/1.0.4)** from GitHub Releases. If you're on a 1.0.4 prerelease, use this link to install the stable build.
 
 ZPBW is a client-side Fabric mod for **Minecraft Java 26.2 and 26.3**, requiring **Java 25**, **Fabric API** and **Fabric Language Kotlin 1.13.13+kotlin.2.4.10 or newer**.
 
@@ -24,8 +24,8 @@ Choose exactly one matching JAR:
 
 | Minecraft | Download | Minimum Fabric Loader | Minimum Fabric API |
 | --- | --- | --- | --- |
-| 26.2 | `zpbw-mc26.2-1.0.3.jar` | 0.19.3 | 0.155.2+26.2 |
-| 26.3 | `zpbw-mc26.3-1.0.3.jar` | 0.19.5 | 0.165.0+26.3 |
+| 26.2 | `zpbw-mc26.2-1.0.4.jar` | 0.19.3 | 0.155.2+26.2 |
+| 26.3 | `zpbw-mc26.3-1.0.4.jar` | 0.19.5 | 0.165.0+26.3 |
 
 Put the matching JAR and dependencies in `mods`, removing the previous standalone ZPBW JAR. Keep your configuration. Prediction and NoSneakDelay default to off on a fresh installation. Blackwell is not required.
 
@@ -59,7 +59,7 @@ Timeouts count every nonzero server Ping packet and require a minimum number of 
 
 ZPBW checks up to ten recent GitHub releases once per client session, in the background, including prereleases. If a newer version contains the complete pair of exact native install artifacts, a notification appears a few seconds after you join SkyBlock, like the first-install welcome. Prerelease notices are orange and make clear that updating is optional, but recommended. It does not download or install updates.
 
-No release, an inaccessible repository or a failed request simply means no update notification. Pre-releases are not offered by this checker.
+No release, an inaccessible repository or a failed request means no update notification.
 
 SkyBlock detection reads Minecraft's sidebar and tab list directly. It does not require another SkyBlock mod or inherit another mod's developer overrides.
 
@@ -77,7 +77,7 @@ With Java 25 installed:
 python tools/verify_dual_native.py
 ```
 
-This tree builds 1.0.4-pre2 independently for released Java 26.2 and 26.3 using Java 25. The command cleans, tests, builds and validates both native roots, then collects a matching immutable pair under `artifacts/native-pairs/<run-id>/`. Install only the JAR matching your exact Minecraft version: `zpbw-mc26.2-1.0.4-pre2.jar` or `zpbw-mc26.3-1.0.4-pre2.jar`. A collected build is **BUILT_UNQUALIFIED**, not runtime-qualified or released. See [native build and validation](docs/dual-native-1.0.3.md).
+This tree builds 1.0.4 independently for Minecraft Java 26.2 and 26.3 using Java 25. The command cleans, tests, builds and validates both native roots, then collects a matching immutable pair under `artifacts/native-pairs/<run-id>/`. Install only the JAR matching your exact Minecraft version. The build tool labels a freshly collected pair **BUILT_UNQUALIFIED** until it is tested in game. See [native build and validation](docs/dual-native-1.0.3.md).
 
 See [validation and known limitations](docs/validation-1.0.3.md) for the release checks. Compilation alone is not functional verification.
 

@@ -6,6 +6,7 @@
     "ZpbwTabOverlayAccessor",
     "ZpbwEtherwarpSoundMixin",
     "ZpbwLandingCameraMixin",
+    "ZpbwOverlayPriorityMixin",
     "ZpbwInputDispatchMixin",
     "ZpbwConnectionMixin",
     "ZpbwTeleportMixin",

@@ -10,20 +10,19 @@ class AutomaticRecoveryTest {
         steps.forEach { fence.nativeResponse(stream, token, it) }
         assertTrue(fence.handlerCompleted(stream, token))
     }
-    @Test fun continuedNativeUsesCannotReuseTheFirstFailuresExpiredStabilizationWindow() {
-        for (contract in contracts) {
-            val stream=Any();val f=RecoveryPredictionFence<Any>(contract)
-            f.bindCurrent(stream);f.suspend(stream,"position_mismatch")
-            repeat(25) { f.nativeTick(stream) }
-            // Reproduce the report: an older native reply arrives shortly after
-            // another native use, while the original failure's timer has elapsed.
+    @Test fun actualUsesInvalidateAuthorityButCompletedRepliesNeedNoQuietTimer() {
+        for(contract in contracts) {
+            val stream=Any();val f=RecoveryPredictionFence<Any>(contract);f.bindCurrent(stream)
             repeat(3) {
-                f.restart(stream) // The actual afterSend Use/UseOn boundary.
-                authority(f,stream,contract);f.inputSampled(stream)
+                f.suspend(stream,"position_mismatch")
+                authority(f,stream,contract);assertTrue(f.awaitingFreshBoundary(stream))
+                f.restart(stream) // An actually sent use invalidates that older authority.
+                assertFalse(f.awaitingFreshBoundary(stream));f.inputSampled(stream)
                 assertFalse(f.naturalTickEnd(stream,true))
-                repeat(19) { f.nativeTick(stream);assertFalse(f.naturalTickEnd(stream,true)) }
+                authority(f,stream,contract)
+                assertFalse(f.naturalTickEnd(stream,true))
+                f.inputSampled(stream);assertTrue(f.naturalTickEnd(stream,true))
             }
-            f.nativeTick(stream);assertTrue(f.naturalTickEnd(stream,true))
         }
     }
 
@@ -37,16 +36,28 @@ class AutomaticRecoveryTest {
         assertFalse(calls.any { it.name in setOf("send","aiStep","sendChanges","sendPosition") })
         assertFalse(calls.any { it.owner.endsWith("/ServerTickTimeouts") && it.name in setOf("issued","cancel","bind") })
     }
-    @Test fun sameConnectionResumesAfterRealAuthorityStabilizationAndFreshInputInBothNatives() {
-        for (contract in contracts) {
-            val stream=Any(); val f=RecoveryPredictionFence<Any>(contract)
-            f.bindCurrent(stream); f.suspend(stream,"position_mismatch")
+    @Test fun oneGenuineReplyAndItsNextFreshBoundaryResumeBothNatives() {
+        for(contract in contracts) {
+            val stream=Any();val f=RecoveryPredictionFence<Any>(contract);f.bindCurrent(stream)
+            f.suspend(stream,"position_mismatch");f.inputSampled(stream)
             authority(f,stream,contract)
-            repeat(19) { f.nativeTick(stream) }
-            f.inputSampled(stream); assertFalse(f.naturalTickEnd(stream,true))
-            f.nativeTick(stream); assertTrue(f.naturalTickEnd(stream,true))
-            assertFalse(f.isSuspended(stream)); assertNull(f.reason(stream))
+            assertEquals("fresh_input",f.blocker(stream,true))
             assertFalse(f.naturalTickEnd(stream,true))
+            f.inputSampled(stream);assertTrue(f.naturalTickEnd(stream,true))
+            assertFalse(f.isSuspended(stream));assertNull(f.reason(stream))
+        }
+    }
+    @Test fun continuingWarpIntentsWaitOneBoundaryWithoutCreatingMoreNativeDebt() {
+        for(contract in contracts) {
+            val stream=Any();val f=RecoveryPredictionFence<Any>(contract);f.bindCurrent(stream)
+            f.suspend(stream,"position_mismatch");authority(f,stream,contract)
+            var queued=0;var sends=0
+            repeat(5) { if(f.awaitingFreshBoundary(stream))queued++ else sends++ }
+            assertEquals(5,queued);assertEquals(0,sends)
+            assertFalse(f.naturalTickEnd(stream,true));f.inputSampled(stream)
+            assertTrue(f.naturalTickEnd(stream,true)) // Unissued intents are not server work.
+            assertFalse(f.awaitingFreshBoundary(stream))
+            queued--;sends++;assertEquals(1,sends);assertEquals(4,queued)
         }
     }
     @Test fun timeInputOrAnEmptyLedgerCannotReplaceARealNativeResponse() {
@@ -106,8 +117,7 @@ class AutomaticRecoveryTest {
         authority(f,stream,contract);repeat(20) { f.nativeTick(stream) };f.inputSampled(stream)
         f.restart(stream);assertFalse(f.naturalTickEnd(stream,true))
         authority(f,stream,contract);f.inputSampled(stream)
-        repeat(19) { f.nativeTick(stream);assertFalse(f.naturalTickEnd(stream,true)) }
-        f.nativeTick(stream);assertTrue(f.naturalTickEnd(stream,true))
+        assertTrue(f.naturalTickEnd(stream,true))
     }
     @Test fun staleConnectionsCannotAdvanceOrCompleteCurrentRecovery() {
         val old=Any();val current=Any();val f=RecoveryPredictionFence<Any>()

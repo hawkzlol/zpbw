@@ -86,7 +86,8 @@ class ClickGuiTest {
         }
         assertEquals(GuiAction.TOGGLE, hit(GuiPage.NO_SNEAK_DELAY, values, GuiAction.TOGGLE))
         assertNull(hit(GuiPage.NO_SNEAK_DELAY, values, GuiAction.CHAIN_DOWN))
-        assertNull(hit(GuiPage.GENERAL, values, GuiAction.TOGGLE))
+        assertFalse(GuiAction.TOGGLE in availableActions(GuiPage.GENERAL, values))
+        assertFalse(GuiAction.REDUCE_CHAT in availableActions(GuiPage.NO_SNEAK_DELAY, values))
         assertEquals(GuiAction.COPY_LOGS, hit(GuiPage.GENERAL, values, GuiAction.COPY_LOGS))
         assertEquals(GuiAction.GITHUB, hit(GuiPage.GENERAL, values, GuiAction.GITHUB))
         assertEquals(GuiAction.GITHUB_ISSUES, hit(GuiPage.GENERAL, values, GuiAction.GITHUB_ISSUES))
@@ -109,7 +110,63 @@ class ClickGuiTest {
         assertTrue(GuiAction.SOUND_PREVIOUS in availableActions(GuiPage.SOUND_PICKER, values, picker))
         assertFalse(GuiAction.SOUND_NEXT in availableActions(GuiPage.SOUND_PICKER, values, picker))
         assertNull(hit(GuiPage.BLINKWARP, values, GuiAction.GITHUB))
-        assertEquals(GuiAction.TOGGLE, hit(GuiPage.NO_SNEAK_DELAY, values, GuiAction.REDUCE_CHAT))
+    }
+
+    @Test fun resetIsOnlyClickableOnBlinkwarpAboveTheLogsButton() {
+        val reset = GuiAction.RESET_BLINKWARP
+        val logs = GuiAction.COPY_LOGS.bounds
+        assertEquals(logs.right, reset.bounds.right)
+        assertTrue(reset.bounds.bottom < logs.y)
+        for (page in GuiPage.entries) {
+            val action = hit(page, values, reset)
+            if (page == GuiPage.BLINKWARP) assertEquals(reset, action) else assertNotEquals(reset, action)
+        }
+    }
+
+    @Test fun blinkwarpHelpStaysVisibleOnHoverAndKeyboardFocusOnlyOnItsPage() {
+        val image = BufferedImage(1280, 800, BufferedImage.TYPE_INT_ARGB)
+        val frame = ClickGuiFrame(GuiPage.BLINKWARP, values, "1.0.4")
+        val output = System.getenv("ZPBW_CLICKGUI_PREVIEW")?.let { Path.of(it, "mc${NativeIdentity.TARGET}") }
+        output?.let { Files.createDirectories(it) }
+        for (help in listOf(GuiAction.CHAIN_HELP, GuiAction.TIMEOUT_HELP)) {
+            assertEquals(help, hit(GuiPage.BLINKWARP, values, help))
+            assertFalse(help in availableActions(GuiPage.GENERAL, values))
+            val x = (help.bounds.right + 16) * 2
+            val y = (help.bounds.y + 5) * 2
+            ClickGuiRaster.paint(image, frame)
+            val withoutTooltip = image.getRGB(x, y)
+            ClickGuiRaster.paint(image, frame.copy(hover = help))
+            val withTooltip = image.getRGB(x, y)
+            assertNotEquals(withoutTooltip, withTooltip)
+            output?.let { ImageIO.write(image, "png", it.resolve("${help.name.lowercase()}.png").toFile()) }
+            ClickGuiRaster.paint(image, frame.copy(focus = help))
+            assertEquals(withTooltip, image.getRGB(x, y))
+            ClickGuiRaster.paint(image, frame.copy(page = GuiPage.GENERAL, hover = help))
+            val general = image.getRGB(x, y)
+            ClickGuiRaster.paint(image, frame.copy(page = GuiPage.GENERAL))
+            assertEquals(general, image.getRGB(x, y))
+        }
+        image.flush()
+    }
+
+    @Test fun failedGuessHelpAppearsAboveItsRowOnlyWithBlinkwarpSoundTiming() {
+        val help = GuiAction.SOUND_ON_FAILED_HELP
+        val immediate = values.copy(overlay = values.overlay.copy(soundTiming = EtherwarpSoundTiming.BLINKWARP))
+        assertEquals(help, hit(GuiPage.SOUND, immediate, help))
+        assertNull(hit(GuiPage.SOUND, values, help))
+        val frame = ClickGuiFrame(GuiPage.SOUND, immediate, "1.0.4")
+        val image = BufferedImage(1280, 800, BufferedImage.TYPE_INT_ARGB)
+        ClickGuiRaster.paint(image, frame)
+        val above = image.getRGB(800, 600)
+        val footer = image.getRGB(800, 740)
+        ClickGuiRaster.paint(image, frame.copy(hover = help))
+        assertNotEquals(above, image.getRGB(800, 600))
+        assertEquals(footer, image.getRGB(800, 740))
+        System.getenv("ZPBW_CLICKGUI_PREVIEW")?.let {
+            val output = Files.createDirectories(Path.of(it, "mc${NativeIdentity.TARGET}"))
+            ImageIO.write(image, "png", output.resolve("failed_guess_help.png").toFile())
+        }
+        image.flush()
     }
 
     @Test fun hexSupportsExactColorAndOpacityAndRejectsPartialValues() {

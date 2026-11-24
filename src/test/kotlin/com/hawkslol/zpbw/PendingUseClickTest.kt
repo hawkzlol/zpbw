@@ -63,7 +63,7 @@ class PendingUseClickTest {
     }
     @Test fun validArmedBlockClicksReachTheSameFiveWarpItemUsePath() {
         assertFalse(click.contains("(block == null || routed)"), "A valid close block click must not occupy the action journal before its Etherwarp use")
-        assertContains(click,"if (warpClick && !positionPending && recoveryBarrier == null && !recoveryResumePending && chain.canAdd && waitingInputs.isEmpty() && !inputDispatchedThisTick) return false")
+        assertContains(click,"if (warpClick && !positionPending && recoveryBarrier == null && !recoveryResumePending && chain.canAdd && waitingInputs.isEmpty() && !inputDispatchedThisTick && !recoveryBoundaryPending()) return false")
         assertContains(click,"chain.tail?.value?.target")
         assertTrue(click.indexOf("if (warpClick && !positionPending") < click.indexOf("val queued = deferAction("))
         assertContains(runtime,"if (mode == Mode.REPLAY && (positionPending || !chain.canAdd))")

@@ -101,6 +101,20 @@ class UpdateCheckerTest {
         assertNull(current.url)
     }
 
+    @Test fun stable104CanUseItsOwnTagAlongsideTheLegacyPrerelease() {
+        val published = releases(release("v1.0.4", prerelease = true), release("1.0.4"))
+        for (target in listOf("26.2", "26.3")) {
+            val update = result("1.0.4-pre3", published, target)
+            assertEquals(UpdateCheckStatus.AVAILABLE, update.status)
+            assertEquals("1.0.4", update.version)
+            assertFalse(update.prerelease)
+            assertEquals("https://github.com/hawkzlol/zpbw/releases/download/1.0.4/zpbw-mc$target-1.0.4.jar", update.url)
+            assertEquals(UpdateCheckStatus.CURRENT, result("1.0.4", published, target).status)
+        }
+        assertEquals(UpdateCheckStatus.NO_COMPATIBLE_ASSETS,
+            result("1.0.3", release("1.0.4", assets = pair("1.0.4", "v1.0.4"))).status)
+    }
+
     @Test fun ignoresDraftButLabelsBothMetadataAndVersionPrereleases() {
         assertEquals(UpdateCheckStatus.IGNORED_RELEASE,result(response=release(draft=true)).status)
         for(response in listOf(release(prerelease=true),release("v2.0.0-rc.1"))) {
