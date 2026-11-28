@@ -34,7 +34,10 @@ public abstract class ZpbwSourceTickMixin {
     @WrapMethod(method = "sendPosition")
     private void zpbw$sourceRotation(Operation<Void> original) {
         ZpbwRuntime.sourceTick((LocalPlayer)(Object)this);
-        try { original.call(); }
+        try {
+            original.call();
+            ZpbwRuntime.sourceTickSucceeded((LocalPlayer)(Object)this);
+        }
         finally { ZpbwRuntime.sourceTickFinished((LocalPlayer)(Object)this); }
     }
 }

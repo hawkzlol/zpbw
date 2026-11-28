@@ -35,6 +35,7 @@ import net.minecraft.world.phys.Vec3
 
 /** User-owned prediction only. No automatic use, guessed response, proxy, or heartbeat ownership. */
 object ZpbwRuntime {
+    private const val LANDING_HEIGHT_OFFSET = 0.05
     private val miningReplay = MiningReplayGate()
     enum class Mode { OFF, OBSERVE, REPLAY }
     private val mc get() = Minecraft.getInstance()
@@ -52,6 +53,7 @@ object ZpbwRuntime {
     private val warpTimeouts = ServerTickTimeouts<Connection>()
     private val stallGuard = ExperimentalStallGuard<Connection>()
     private var experimentalRepairs = true
+    private var outboundPrediction = true
     private var repairRecovery = false
     private var timeoutTicks = 20
     private var firstInstall = true
@@ -107,6 +109,7 @@ object ZpbwRuntime {
     private val transmittedCollisions = TransmittedCollisionHistory()
     private val movementInputs = MovementInputHistory()
     private val transmittedPosition = TransmittedPositionHistory()
+    private val settlementSample = SettlementSampleGate()
     private val transmittedControls = TransmittedControlHistory()
     private val carriedSlots = CarriedSlotHistory<Connection>()
     private data class WaitingInput(val name: String, val warp: Boolean, val stream: Connection,
@@ -132,11 +135,12 @@ object ZpbwRuntime {
     private val settingsStore by lazy { ZpbwSettingsStore(FabricLoader.getInstance().gameDir.resolve("config/zpbw")) }
 
     private data class Pending(val generation: Long, val stream: Connection, val player: LocalPlayer,
-        val level: ClientLevel, val target: Vec3, var source: PositionMoveRotation,
+        val level: ClientLevel, var target: Vec3, var source: PositionMoveRotation,
         var sourcePose: Pose, val started: Long, val dependent: Boolean,
         var use: ServerboundUseItemPacket? = null, val queuedInput: Boolean = false,
-        val rayTrace: com.hawkslol.zpbw.geometry.EtherwarpTrace? = null,
-        val predictionContext: String, val repairStamp: ExperimentalStallGuard.Stamp? = null)
+        var rayTrace: com.hawkslol.zpbw.geometry.EtherwarpTrace? = null,
+        val predictionContext: String, val repairStamp: ExperimentalStallGuard.Stamp? = null,
+        val outboundExperiment: Boolean = false, var outboundComparison: OutboundPredictionComparison? = null)
     private data class MismatchFollowup(val generation: Long, val initialId: Int, val target: Vec3,
                                        val started: Long, var count: Int = 0)
     private data class Observation(val stream: Connection, val target: Vec3,
@@ -177,6 +181,7 @@ object ZpbwRuntime {
             overlayOptions = settings.etherwarpOverlay
             SmoothLandings.configure(settings.smoothLandings)
             experimentalRepairs = settings.experimentalRepairs
+            outboundPrediction = settings.outboundPrediction
             NoSneakDelay.configure(settings.noSneakDelay)
             mode = if (settings.enabled) Mode.REPLAY else Mode.OFF
         } catch (failure: Exception) {
@@ -191,6 +196,7 @@ object ZpbwRuntime {
         if (requested == Mode.OBSERVE && chain.count > 0) return "Use /zpbw off first; let the current chain settle."
         if (requested != mode) invalidateRecoveryAdmission()
         if (requested == Mode.OFF) {
+            settlementSample.reset()
             SmoothLandings.clear()
             cancelWaitingInputs("disabled")
             mode = requested; event("MODE OFF pending=${chain.count}")
@@ -258,6 +264,20 @@ object ZpbwRuntime {
             return false
         }
         SmoothLandings.configure(enabled)
+        return true
+    }
+
+    internal fun configureOutboundPrediction(enabled: Boolean): Boolean {
+        check(mc.isSameThread)
+        try { settingsStore.saveStrict(settingsSnapshot().copy(outboundPrediction = enabled)) }
+        catch (failure: Exception) {
+            configErrors++
+            event("OUTBOUND_PREDICTION_SAVE_FAILED type=${failure.javaClass.simpleName}")
+            return false
+        }
+        outboundPrediction = enabled
+        if (!enabled) settlementSample.reset()
+        event("OUTBOUND_PREDICTION enabled=$enabled pending=${chain.count}")
         return true
     }
 
@@ -398,6 +418,7 @@ object ZpbwRuntime {
             recovery = System.nanoTime() < recoveringUntil,
             inputCommitted = NoSneakDelay.hasCommitment()))
         if (acquired) {
+            settlementSample.reset()
             SmoothLandings.clear()
             invalidateRecoveryAdmission()
             mismatchFollowup = null
@@ -505,7 +526,7 @@ object ZpbwRuntime {
             val attempt = ++rayAttempt
             predicted.diagnostics.forEach { event("PREDICTION_RAY attempt=$attempt nextGeneration=${generation + 1} pending=${chain.count} $it") }
         }
-        val unshifted = predicted?.takeIf { it.succeeded }?.landingFeetPosition?.add(0.0, 0.05, 0.0)
+        val unshifted = predicted?.takeIf { it.succeeded }?.landingFeetPosition?.add(0.0, LANDING_HEIGHT_OFFSET, 0.0)
         if (recoveryBoundary) {
             if (unshifted == null) return false
             queuedUse = queueInput("warp_use", true) { mc.gameMode!!.useItem(local, hand) }
@@ -558,7 +579,8 @@ object ZpbwRuntime {
         if (chain.count == 0) epoch++ // New independent chain, not an old scheduled callback's owner.
         chain.add(generation, Pending(generation, stream, local, level, target, sourcePose.move,
             sourcePose, System.nanoTime(), anchor != null, queuedInput = dispatchingInput != null, rayTrace = predicted.trace,
-            predictionContext = predictionContext, repairStamp = stallGuard.stamp(stream, System.nanoTime())))
+            predictionContext = predictionContext, repairStamp = stallGuard.stamp(stream, System.nanoTime()),
+            outboundExperiment = chain.tail?.value?.outboundExperiment ?: outboundPrediction))
         val budget = dispatchingInput
         if (!warpTimeouts.startAt(stream, generation, budget?.ticks ?: timeoutTicks, budget?.deadline)) {
             recover(if (budget == null) "session_transition" else "server_tick_timeout", timeout = budget?.ticks)
@@ -631,6 +653,30 @@ object ZpbwRuntime {
     /** Only reached after the real send delegate; cancelled capture never reaches it. */
     @JvmStatic fun beforeSendDelegate(connection: Connection, packet: Packet<*>) {
         if (connection !== connected) return
+        if (mc.isSameThread && packet is ServerboundUseItemPacket && packet.hand == InteractionHand.MAIN_HAND &&
+            !bypass && handling == null) {
+            val pending = chain.tail?.takeIf { !it.cut }?.value
+            if (pending != null && pending.outboundExperiment && !pending.dependent && pending.use == null &&
+                pending.outboundComparison == null && identity(pending) && !externalPredictionActive()) {
+                val local = pending.player.position()
+                val sent = transmittedPosition.position?.let { Vec3(it.x, it.y, it.z) }
+                val sneak = predictionSneak()
+                fun ray(origin: Vec3) = EtherwarpPredictor.predictCurrentEtherwarpForRotation(
+                    packet.yRot, packet.xRot, origin, sneakingOverride = sneak, captureTrace = true)
+                val localRay = ray(local)
+                val sentRay = sent?.let { if (it == local) localRay else ray(it) }
+                val comparison = OutboundPredictionComparison(local, sent, packet.yRot, packet.xRot, localRay, sentRay)
+                pending.outboundComparison = comparison
+                comparison.selected?.let { selected ->
+                    pending.target = selected.landingFeetPosition!!.add(0.0, LANDING_HEIGHT_OFFSET, 0.0)
+                    pending.rayTrace = selected.trace
+                }
+                event("OUTBOUND_PREDICTION_SAMPLE generation=${pending.generation} sequence=${packet.sequence} " +
+                    "local=$local sent=$sent yaw=${packet.yRot} pitch=${packet.xRot} " +
+                    "localTarget=${localRay?.landingFeetPosition} sentTarget=${sentRay?.landingFeetPosition} " +
+                    "selected=${comparison.selection} issuedTarget=${pending.target}")
+            }
+        }
         NativeDispatchScopes.delegating(connection, packet)?.let {
             log.record("SEND_REQUEST occurrence=${it.id} action=${it.action} kind=${kind(packet)}")
         }
@@ -638,6 +684,8 @@ object ZpbwRuntime {
     @JvmStatic fun afterSend(connection: Connection, packet: Packet<*>) {
         if (!mc.isSameThread || connection !== connected) return
         val rotationResponse = NativeRotationResponseScope.isCurrentResponse(connection, packet)
+        if (!bypass && handling == null && !rotationResponse && packet is ServerboundMovePlayerPacket)
+            settlementSample.sent(kind(packet))
         // Include bypass replay and genuine native responses, but never retained packets.
         transmittedControls.sent(packet)
         NativeTeleportContract.combinedAcknowledgement(packet)?.let { acknowledged ->
@@ -662,6 +710,9 @@ object ZpbwRuntime {
         if (packet is ServerboundMovePlayerPacket && packet.hasPosition())
             transmittedPosition.position(packet.getX(0.0), packet.getY(0.0), packet.getZ(0.0), regular = handling == null)
         if (packet is ServerboundClientTickEndPacket) {
+            if (!bypass && handling == null) settlementSample.end(connection, mc.level, mc.player)?.let {
+                event("SETTLEMENT_SAMPLE_READY generation=$it nativeTick=${mc.level?.gameTime}")
+            }
             transmittedPosition.tickEnd()
             val resumed = recoveryResume.naturalTickEndSent()
             if (resumed != RecoveryResumeGate.Completion.WAITING) {
@@ -744,7 +795,7 @@ object ZpbwRuntime {
         chain.cut(tail.generation)
         event("SOURCE_TICK_END_REQUESTED generation=${p.generation} source=${xyz(p.sourcePose.move.position())} yaw=${p.sourcePose.move.yRot()} pitch=${p.sourcePose.move.xRot()} target=${xyz(p.target)}")
         p.player.setPos(p.target); p.player.deltaMovement = Vec3.ZERO; p.player.setOldPosAndRot()
-        SmoothLandings.begin(p.player)
+        SmoothLandings.begin(p.player, LANDING_HEIGHT_OFFSET)
         prepareReplayLook(p.player)
         if (p.dependent) {
             // Position changes and discarded speculative ticks do not advance collision history.
@@ -763,6 +814,10 @@ object ZpbwRuntime {
     @JvmStatic fun sourceTick(player: LocalPlayer) {
         if (externalPredictionActive()) return
         if (!mc.isSameThread || player !== sessionPlayer) return
+        if (outboundPrediction && chain.count == 0 && handling == null && !bypass &&
+            settlementSample.begin(connected, mc.level, player))
+            event("SETTLEMENT_SAMPLE_BEGIN pose=${xyz(player.position())} velocity=${xyz(player.deltaMovement)} " +
+                "ground=${player.onGround()} horizontal=${player.horizontalCollision} nativeTick=${mc.level?.gameTime}")
         val tail = chain.tail ?: return
         val p = tail.value
         if (!mc.isSameThread || handling != null || tail.cut || !p.dependent || p.use == null || player !== p.player || !identity(p)) return
@@ -793,9 +848,19 @@ object ZpbwRuntime {
     }
     @JvmStatic fun sourceTickFinished(player: LocalPlayer) {
         if (externalPredictionActive()) return
+        settlementSample.finish()
         val saved = sourceCollision ?: return
         sourceCollision = null
         if (player === saved.first) { player.setOnGround(saved.second); player.horizontalCollision = saved.third }
+    }
+    /** Only the successful original sendPosition return qualifies; finally cleanup cannot. */
+    @JvmStatic fun sourceTickSucceeded(player: LocalPlayer) {
+        if (externalPredictionActive()) return
+        if (!mc.isSameThread || player !== sessionPlayer) return
+        settlementSample.completed(connected, mc.level, player)?.let {
+            event("SETTLEMENT_SAMPLE_SENT generation=${it.generation} packets=${it.packets} " +
+                "first=${it.firstPacket ?: "none_native_suppression"} pose=${xyz(player.position())}")
+        }
     }
     /** The queued native click, its physics and its movement report share one input sample.
      * Restore both current and interpolated view before rendering; never override only the wire look. */
@@ -844,6 +909,7 @@ object ZpbwRuntime {
         val duplicate = teleportIds.record(packet.id())
         realTeleports++
         if (externalPredictionActive()) return false // The external owner and vanilla own this handler.
+        settlementSample.reset()
         event("TELEPORT id=${packet.id()} duplicate=$duplicate raw=${xyz(packet.change().position())} flags=${packet.relatives()} pending=${chain.count} velocity=${xyz(packet.change().deltaMovement())} yaw=${packet.change().yRot()} pitch=${packet.change().xRot()}")
         if (chain.nativeFallback) {
             SmoothLandings.clear()
@@ -885,6 +951,10 @@ object ZpbwRuntime {
             return false
         }
         val absolute = PositionMoveRotation.calculateAbsolute(p.source, packet.change(), packet.relatives())
+        p.outboundComparison?.let {
+            event("OUTBOUND_PREDICTION_RESULT generation=${p.generation} id=${packet.id()} " +
+                "duplicate=$duplicate ${it.result(absolute.position(), LANDING_HEIGHT_OFFSET)}")
+        }
         val decision = ConfirmationPolicy.inspect(p.source, p.target, absolute, packet.relatives())
         val exact = decision.canReplay
         val identityValid = identity(p)
@@ -1041,6 +1111,13 @@ object ZpbwRuntime {
                     return
                 }
                 if (chain.count == 0) epoch++
+                if (chain.count == 0 && p.outboundExperiment && outboundPrediction && mode == Mode.REPLAY) {
+                    settlementSample.arm(p.stream, p.level, p.player, p.generation)
+                    event("SETTLEMENT_SAMPLE_ARMED generation=${p.generation} id=${packet.id()} " +
+                        "authority=${xyz(p.player.position())} authorityVelocity=${xyz(p.player.deltaMovement)} " +
+                        "advanced=${xyz(h.advanced!!.move.position())} held=${held.size} " +
+                        "firstMove=${held.filterIsInstance<Held.Wire>().firstOrNull { it.packet is ServerboundMovePlayerPacket }?.let { kind(it.packet) } ?: "none"}")
+                }
                 h.advanced!!.restore(p.player)
                 bypass = true
                 try { for (original in held) when (original) {
@@ -1487,6 +1564,7 @@ object ZpbwRuntime {
         if (chain.pendingSnapshot().any { it.value.use != null })
             suspendRecoveryPrediction(connected, "disconnect_with_issued_use")
         connected?.let(NativeDispatchScopes::clear)
+        settlementSample.reset()
         carriedSlots.bind(null)
         miningReplay.reset()
         firstInstallNotice.reset()
@@ -1509,7 +1587,7 @@ object ZpbwRuntime {
         mismatchFollowup = null
         event("DISCONNECT cleared=true enabled=${mode == Mode.REPLAY}")
     }
-    fun status() = "${if (mode == Mode.REPLAY) "on" else "off"}; orderedActions=true, nsd=${NoSneakDelay.enabled}, experimentalRepairs=$experimentalRepairs, pending=${chain.count}/${chain.maximum}, timeoutTicks=$timeoutTicks, recoverySuspended=${recoveryFence.isSuspended(connected)}, drainProved=$recoveryAdmissionReady, recoveryReason=${recoveryFence.reason(connected) ?: "none"}, retained=${chain.size}, genuine=$realTeleports, observedMatches=$observed, settled=$replayed, fallbacks=$failed, motionCorrections=$motionCorrections, physicsRebases=$physicsRebases, logDrops=${log.dropped.get()}, logErrors=${log.errors.get()}, configErrors=$configErrors; remote acceptance not measured"
+    fun status() = "${if (mode == Mode.REPLAY) "on" else "off"}; orderedActions=true, nsd=${NoSneakDelay.enabled}, experimentalRepairs=$experimentalRepairs, outboundPrediction=$outboundPrediction, pending=${chain.count}/${chain.maximum}, timeoutTicks=$timeoutTicks, recoverySuspended=${recoveryFence.isSuspended(connected)}, drainProved=$recoveryAdmissionReady, recoveryReason=${recoveryFence.reason(connected) ?: "none"}, retained=${chain.size}, genuine=$realTeleports, observedMatches=$observed, settled=$replayed, fallbacks=$failed, motionCorrections=$motionCorrections, physicsRebases=$physicsRebases, logDrops=${log.dropped.get()}, logErrors=${log.errors.get()}, configErrors=$configErrors; remote acceptance not measured"
 
     private fun physicsState(player: LocalPlayer): List<Double> = listOf(
         Attributes.MOVEMENT_SPEED, Attributes.GRAVITY, Attributes.JUMP_STRENGTH,
@@ -1579,7 +1657,7 @@ object ZpbwRuntime {
         return "ZPBW troubleshooting report v1\n" +
             "Version: ${ZpbwClient.version}\nCaptured: ${java.time.Instant.now()}\n" +
             "Platform: ${bounded(System.getProperty("os.name", "unknown"))}; Java: ${bounded(System.getProperty("java.version", "unknown"))}\n" +
-            "Session: $environment; Minecraft: ${NativeIdentity.TARGET}\nSettings: enabled=${mode == Mode.REPLAY}, noSneakDelay=${NoSneakDelay.enabled}, chainMax=${chain.maximum}, timeoutTicks=$timeoutTicks, experimentalRepairs=$experimentalRepairs, firstInstall=$firstInstall, reducedChatLogs=$reducedChatLogs, disableChatLogs=$disableChatLogs\n" +
+            "Session: $environment; Minecraft: ${NativeIdentity.TARGET}\nSettings: enabled=${mode == Mode.REPLAY}, noSneakDelay=${NoSneakDelay.enabled}, chainMax=${chain.maximum}, timeoutTicks=$timeoutTicks, experimentalRepairs=$experimentalRepairs, outboundPrediction=$outboundPrediction, firstInstall=$firstInstall, reducedChatLogs=$reducedChatLogs, disableChatLogs=$disableChatLogs\n" +
             "State: ${status()}\nRecovery: ${recoveryFence.diagnostics(connected)} queued=${waitingInputs.size} inputBoundaryPending=$recoveryResumePending\nServer lag compensation: enabled=$experimentalRepairs nativeFallback=${chain.nativeFallback} repairRecovery=$repairRecovery ${stallGuard.diagnostics(connected, System.nanoTime(), chain.head?.value?.repairStamp)}\nUpdate check: ${updateChecker.status}\nMods: $mods\n" +
             "Contains local positions, timings and mod versions. No chat, server address, account details or raw packet payloads are collected.\n\n" + log.snapshot()
     }
@@ -1608,6 +1686,7 @@ object ZpbwRuntime {
             transmittedCollisions.reset()
             movementInputs.reset()
             transmittedPosition.reset()
+            settlementSample.reset()
             transmittedControls.reset()
             mismatchFollowup = null
             event("SESSION epoch=$epoch discarded=$count connected=${stream != null}")
@@ -1618,6 +1697,7 @@ object ZpbwRuntime {
     /** Before vanilla replaces its player/world but preserves the game-mode sender cache. */
     @JvmStatic fun beforeWorldReplacement(stream: Connection) {
         if (!mc.isSameThread || stream !== connected) return
+        settlementSample.reset()
         SmoothLandings.clear()
         carriedSlots.abandon(stream)?.let { slot ->
             (mc.gameMode as? ZpbwGameModeAccessor)?.`zpbw$setCarriedIndex`(slot)
@@ -1626,7 +1706,7 @@ object ZpbwRuntime {
     }
     internal fun settingsSnapshot() = ZpbwSettings(mode == Mode.REPLAY, NoSneakDelay.enabled, timeoutTicks,
         firstInstall, chain.maximum, reducedChatLogs, disableChatLogs, disableInRestrictedLocations, overlayOptions,
-        SmoothLandings.enabled, experimentalRepairs)
+        SmoothLandings.enabled, experimentalRepairs, outboundPrediction)
     private fun saveSettings(): Boolean = try {
         settingsStore.save(settingsSnapshot()); true
     } catch (failure: Exception) {
@@ -1636,6 +1716,7 @@ object ZpbwRuntime {
         ConfirmationPolicy.inspect(source, target, actual, packet.relatives()).canReplay
     private fun recover(reason: String, restore: Boolean = true, actual: Vec3? = null, positionConfirmed: Boolean = false, timeout: Int? = null,
                         retainForRecovery: Boolean = false) {
+        settlementSample.reset()
         SmoothLandings.clear()
         invalidateRecoveryAdmission() // Includes empty-ledger fallback before a real vanilla use.
         if (recoveryBarrier != null) {
@@ -1864,8 +1945,9 @@ object ZpbwRuntime {
     /** Admission only. The existing cut tail retains original movement until genuine drain;
      * the next original keybind callback retries the unchanged, bounded waiting input. */
     private fun positionReportPending() = mode == Mode.REPLAY &&
-        !NativeTeleportContract.responseIncludesMovementPosition && transmittedPosition.waitForPosition(
-            chain.retainedCount { it is Held.Wire && it.packet is ServerboundClientTickEndPacket })
+        ((outboundPrediction && chain.count == 0 && settlementSample.pending(connected, mc.level, mc.player)) ||
+            (!NativeTeleportContract.responseIncludesMovementPosition && transmittedPosition.waitForPosition(
+                chain.retainedCount { it is Held.Wire && it.packet is ServerboundClientTickEndPacket })))
     private fun forwardEnvelope(stream: Connection, held: List<Held>, reason: String, cancelWorldActions: Boolean = false) {
         bypass = true
         try { for (entry in held) if (entry is Held.Wire) {

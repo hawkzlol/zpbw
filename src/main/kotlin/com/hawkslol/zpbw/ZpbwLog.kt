@@ -84,7 +84,8 @@ class ZpbwLog : AutoCloseable {
             event.startsWith("RECOVERY_") || event.startsWith("REPAIR_") -> recovery.append(line)
             event.startsWith("INPUT_") || event.startsWith("ACTION_") || event.startsWith("USE_") ||
                 event.startsWith("ATTACK_") || event.startsWith("BLOCK_") || event.startsWith("ENTITY_") -> actions.append(line)
-            event.startsWith("PREDICTION_") || event in PREDICTION_EVENTS -> prediction.append(line)
+            event.startsWith("PREDICTION_") || event.startsWith("OUTBOUND_PREDICTION") ||
+                event in PREDICTION_EVENTS -> prediction.append(line)
             else -> history.append(line)
         }
     }
@@ -178,6 +179,7 @@ class ZpbwLog : AutoCloseable {
         private val INCIDENT_EVENTS = setOf("MISMATCH", "FALLBACK", "TIMEOUT", "NATIVE_HANDLER_ABORTED",
             "EXPERIMENTAL_STALL", "EXPERIMENTAL_STALE_SETTLEMENT", "RECOVERY_NATIVE_OWNERSHIP_RETIRED", "INPUT_TIMEOUT")
         private val PREDICTION_EVENTS = setOf("PREPARED", "GENUINE_MATCH", "NATIVE_RESPONSE", "NATIVE_ACK_POSE",
+            "SETTLEMENT_SAMPLE_ARMED", "SETTLEMENT_SAMPLE_BEGIN", "SETTLEMENT_SAMPLE_SENT", "SETTLEMENT_SAMPLE_READY",
             "TELEPORT", "VANILLA_HANDLER_COMPLETE", "SETTLED")
     }
 }

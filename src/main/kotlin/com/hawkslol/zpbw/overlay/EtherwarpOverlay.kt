@@ -65,7 +65,7 @@ internal object EtherwarpOverlay {
         val poseStack = context.poseStack()
         val position = player.position()
         val anchor = ZpbwRuntime.etherwarpOverlayOrigin()
-        val sneaking = client.options.keyShift.isDown || player.isShiftKeyDown
+        val sneaking = options.showAlways || client.options.keyShift.isDown || player.isShiftKeyDown
         val old = previous
         if (old == null || old.world !== level || old.player !== player || old.tick != player.tickCount ||
             old.position != position || old.anchor != anchor || old.yaw != player.yRot || old.pitch != player.xRot ||

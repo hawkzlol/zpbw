@@ -305,6 +305,10 @@ internal class ClickGuiScreen : Screen(Component.literal("ZPBW Settings")) {
                 warning = true
                 notice = "Could not save Server Lag Compensation."
             }
+            GuiAction.OUTBOUND_PREDICTION -> if (!ZpbwRuntime.configureOutboundPrediction(!values.outboundPrediction)) {
+                warning = true
+                notice = "Could not save Outbound Prediction."
+            }
             GuiAction.OVERLAY_TOGGLE -> save(values, values.overlay.copy(enabled = !values.overlay.enabled))
             GuiAction.SHOW_ALWAYS -> save(values, values.overlay.copy(showAlways = !values.overlay.showAlways))
             GuiAction.DEPTH -> save(values, values.overlay.copy(depth = !values.overlay.depth))
@@ -409,7 +413,7 @@ internal class ClickGuiScreen : Screen(Component.literal("ZPBW Settings")) {
         var overlay = pendingLineWidth?.let { etherwarpOverlay.copy(lineWidth = it) } ?: etherwarpOverlay
         pendingSoundAdjustment?.let { overlay = updateSoundOption(overlay, checkNotNull(activeSlider), it) }
         ClickGuiValues(enabled, noSneakDelay, chainMax, timeoutTicks, reducedChatLogs, disableChatLogs,
-            disableInRestrictedLocations, overlay, smoothLandings, experimentalRepairs)
+            disableInRestrictedLocations, overlay, smoothLandings, experimentalRepairs, outboundPrediction)
     }
 
     private fun viewport(): ClickGuiViewport? {

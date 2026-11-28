@@ -25,7 +25,8 @@ data class ZpbwSettings(val enabled: Boolean = false, val noSneakDelay: Boolean 
                         val chainMax: Int = 5, val reducedChatLogs: Boolean = false,
                         val disableChatLogs: Boolean = false, val disableInRestrictedLocations: Boolean = true,
                         val etherwarpOverlay: EtherwarpOptions = EtherwarpOptions(),
-                        val smoothLandings: Boolean = false, val experimentalRepairs: Boolean = true) {
+                        val smoothLandings: Boolean = false, val experimentalRepairs: Boolean = true,
+                        val outboundPrediction: Boolean = true) {
     init { require(timeoutTicks in 2..20); require(chainMax in 1..5) }
 }
 
@@ -97,7 +98,7 @@ class ZpbwSettingsStore(private val directory: Path,
             reducedChatLogs = option("reducedChatLogs"), disableChatLogs = option("disableChatLogs"),
             disableInRestrictedLocations = option("disableInRestrictedLocations", true),
             etherwarpOverlay = readOverlay(root), smoothLandings = option("smoothLandings"),
-            experimentalRepairs = option("experimentalRepairs", true))
+            experimentalRepairs = option("experimentalRepairs", true), outboundPrediction = option("outboundPrediction", true))
         if (hasConfig && (!root.has("firstInstall") || root.get("timeoutTicks")?.asInt != ticks ||
                 root.get("chainMax")?.toString() != chainMax.toString() ||
                 retiredOptions.any(root::has))) {
@@ -154,6 +155,7 @@ class ZpbwSettingsStore(private val directory: Path,
         root.addProperty("disableInRestrictedLocations", settings.disableInRestrictedLocations)
         root.addProperty("smoothLandings", settings.smoothLandings)
         root.addProperty("experimentalRepairs", settings.experimentalRepairs)
+        root.addProperty("outboundPrediction", settings.outboundPrediction)
         writeOverlay(root, settings.etherwarpOverlay)
         Files.createDirectories(directory)
         val temporary = Files.createTempFile(directory, "zpbw-config-", ".tmp")

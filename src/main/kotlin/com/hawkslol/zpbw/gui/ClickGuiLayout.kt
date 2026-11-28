@@ -48,6 +48,7 @@ internal enum class GuiAction(val bounds: GuiRect) {
     DISABLE_CHAT(GuiRect(578, 138, 46, 20)),
     RESTRICT_LOCATIONS(GuiRect(578, 182, 46, 20)),
     EXPERIMENTAL_REPAIRS(GuiRect(578, 226, 46, 20)),
+    OUTBOUND_PREDICTION(GuiRect(578, 270, 46, 20)),
     OVERLAY_TOGGLE(GuiRect(578, 98, 46, 20)),
     SHOW_ALWAYS(GuiRect(578, 124, 46, 20)),
     SUCCESS_FILL(GuiRect(512, 151, 112, 21)),
@@ -88,8 +89,8 @@ internal enum class GuiAction(val bounds: GuiRect) {
     PREVIEW_3(GuiRect(554, 221, 70, 23)),
     PREVIEW_4(GuiRect(554, 249, 70, 23)),
     PREVIEW_5(GuiRect(554, 277, 70, 23)),
-    GITHUB(GuiRect(151, 282, 90, 26)),
-    GITHUB_ISSUES(GuiRect(249, 282, 96, 26)),
+    GITHUB(GuiRect(151, 312, 90, 26)),
+    GITHUB_ISSUES(GuiRect(249, 312, 96, 26)),
     RESET_BLINKWARP(GuiRect(416, 323, 208, 26)),
     COPY_LOGS(GuiRect(482, 365, 142, 26)),
     CLOSE(GuiRect(601, 5, 30, 28));
@@ -101,7 +102,8 @@ internal data class ClickGuiValues(
     val enabled: Boolean, val noSneakDelay: Boolean, val chainMax: Int, val timeoutTicks: Int,
     val reducedChatLogs: Boolean = false, val disableChatLogs: Boolean = false,
     val disableInRestrictedLocations: Boolean = true, val overlay: EtherwarpOptions = EtherwarpOptions(),
-    val smoothLandings: Boolean = false, val experimentalRepairs: Boolean = true
+    val smoothLandings: Boolean = false, val experimentalRepairs: Boolean = true,
+    val outboundPrediction: Boolean = true
 )
 
 internal enum class OverlayColor(val action: GuiAction, val label: String, val read: (EtherwarpOptions) -> Int) {
@@ -160,6 +162,7 @@ internal fun availableActions(page: GuiPage, values: ClickGuiValues, picker: Gui
         add(GuiAction.DISABLE_CHAT)
         add(GuiAction.RESTRICT_LOCATIONS)
         add(GuiAction.EXPERIMENTAL_REPAIRS)
+        add(GuiAction.OUTBOUND_PREDICTION)
         add(GuiAction.GITHUB)
         add(GuiAction.GITHUB_ISSUES)
     }

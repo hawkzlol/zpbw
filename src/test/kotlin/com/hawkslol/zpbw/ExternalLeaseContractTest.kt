@@ -29,7 +29,7 @@ class ExternalLeaseContractTest {
         }
     }
     @Test fun modifyingHooksReturnBeforeTouchingExternalTraffic() {
-        val names = listOf("redirectShovelBlockUse", "beforeUse", "capture", "sourceTick", "sourceTickFinished",
+        val names = listOf("redirectShovelBlockUse", "beforeUse", "capture", "sourceTick", "sourceTickFinished", "sourceTickSucceeded",
             "nativeResponse", "afterGenuine", "deferUseClick", "deferEntityClick", "deferAction",
             "beforePhysicsUpdate", "afterPhysicsUpdate")
         for (name in names) {

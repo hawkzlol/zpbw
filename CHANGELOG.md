@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.5-pre1 (prerelease)
+
+- Overlay’s **Show Always** uses crouching eye height, even while standing.
+- Adjusted **Smooth Landings** to reduce the small vertical camera dip after Blinkwarp.
+- Added experimental prediction changes, enabled by default. You can turn them off in General.
+
 ## 1.0.4 — 2026-11-24
 
 - Open the settings menu with `/zpbw`. It remembers the last tab and has an optimized Blinkwarp preset and help for chain maximum, timeout, and sounds on failed guesses.

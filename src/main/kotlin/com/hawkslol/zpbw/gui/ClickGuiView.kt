@@ -95,14 +95,19 @@ internal object ClickGuiView {
                     GuiAction.RESTRICT_LOCATIONS, values.disableInRestrictedLocations, hover)
                 chatSwitch("Server Lag Compensation (Experimental)", "Attempts to fix a kick that occurs during server stalls.",
                     GuiAction.EXPERIMENTAL_REPAIRS, values.experimentalRepairs, hover)
-                text("Run /zpbw help to see available commands.", CONTENT_LEFT, 264, 13, MUTED)
+                chatSwitch("Outbound Prediction (Experimental)", "Uses outbound aim and last-sent position for the first warp.",
+                    GuiAction.OUTBOUND_PREDICTION, values.outboundPrediction, hover)
                 button("GitHub", GuiAction.GITHUB, true, hover)
                 button("Report Issues", GuiAction.GITHUB_ISSUES, true, hover)
                 val credit = "ZPBW, made with"
-                text(credit, CONTENT_LEFT, 321, 12, MUTED)
-                val heartX = CONTENT_LEFT + textWidth(credit, 12) + 4
-                icon(GuiIcon.HEART, GuiRect(heartX, 322, 12, 12))
-                text("by zhxwks", heartX + 16, 321, 12, MUTED)
+                val author = "by zhxwks"
+                val row = GuiAction.GITHUB.bounds
+                val centerY = row.y + row.height / 2
+                val authorX = GuiAction.COPY_LOGS.bounds.right - textWidth(author, 12)
+                val heartX = authorX - 16
+                centeredLabel(credit, heartX - 4 - textWidth(credit, 12), centerY, 12, MUTED, strong = false)
+                icon(GuiIcon.HEART, GuiRect(heartX, centerY - 6, 12, 12))
+                centeredLabel(author, authorX, centerY, 12, MUTED, strong = false)
             }
             GuiPage.OVERLAY -> overlay(values.overlay, hover)
             GuiPage.SOUND -> sound(values.overlay, picker, hover)

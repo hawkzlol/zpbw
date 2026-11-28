@@ -4,74 +4,61 @@ import net.minecraft.client.Camera
 import net.minecraft.client.Minecraft
 import net.minecraft.client.player.LocalPlayer
 import net.minecraft.world.phys.Vec3
-import kotlin.math.abs
-import kotlin.math.exp
 
 /** Client-thread state for the extracted render camera only. */
 object SmoothLandings {
     internal var enabled = false
         private set
     private var player: LocalPlayer? = null
-    private var filter: LandingVerticalSmoother? = null
+    private var settle: LandingCameraSettle? = null
 
     internal fun configure(value: Boolean) {
         enabled = value
         clear()
     }
 
-    internal fun begin(owner: LocalPlayer) {
+    internal fun begin(owner: LocalPlayer, heightOffset: Double) {
         if (!enabled) return
         player = owner
-        filter = LandingVerticalSmoother(System.nanoTime())
+        settle = LandingCameraSettle(owner.y, heightOffset, System.nanoTime())
     }
 
     internal fun clear() {
         player = null
-        filter = null
+        settle = null
     }
 
     @JvmStatic
-    fun renderPosition(camera: Camera, native: Vec3): Vec3 {
-        val current = filter ?: return native
+    fun renderPosition(camera: Camera, native: Vec3, partialTick: Float): Vec3 {
+        val current = settle ?: return native
         val client = Minecraft.getInstance()
         val owner = player
         if (owner == null || owner !== client.player || owner.level() !== client.level ||
-            camera.entity() !== owner || camera.isDetached || owner.isSpectator) {
+            camera.entity() !== owner || camera.isDetached || owner.isSpectator || owner.isPassenger || owner.isSleeping) {
             clear()
             return native
         }
-        val y = current.sample(native.y, System.nanoTime())
-        if (y == null) {
+        val offset = current.offset(owner.yo, owner.y, partialTick, System.nanoTime())
+        if (offset == null) {
             clear()
             return native
         }
-        return if (y == native.y) native else Vec3(native.x, y, native.z)
+        return if (offset == 0.0) native else Vec3(native.x, native.y - offset, native.z)
     }
 }
 
-/** Pass the first destination frame through, then damp only small deviations from it. */
-internal class LandingVerticalSmoother(private val startedAt: Long) {
-    private var landingY: Double? = null
-    private var lastSample = startedAt
-    private var smoothed = 0.0
+/** Remove the remaining landing offset from the render camera, including the first frame. */
+internal class LandingCameraSettle(private val arrivalY: Double, private val heightOffset: Double, private val startedAt: Long) {
+    private val floorY = arrivalY - heightOffset
 
-    /** Null ends the effect and passes control back to the native renderer immediately. */
-    fun sample(y: Double, now: Long): Double? {
-        val age = now - startedAt
-        if (!y.isFinite() || age < 0 || age >= 220_000_000L) return null
-        val anchor = landingY
-        if (anchor == null) {
-            landingY = y
-            smoothed = y
-            lastSample = now
-            return y
-        }
-        if (abs(y - anchor) > 0.10) return null
-        val elapsed = now - lastSample
-        if (elapsed < 0) return null
-        lastSample = now
-        smoothed += (y - smoothed) * (1.0 - exp(-elapsed / 45_000_000.0))
-        val weight = ((220_000_000L - age) / 65_000_000.0).coerceIn(0.0, 1.0)
-        return y + (smoothed - y) * weight
+    /** Null releases the camera on native motion outside the settling interval. */
+    fun offset(previousFeetY: Double, feetY: Double, partialTick: Float, now: Long): Double? {
+        if (now - startedAt !in 0L until 220_000_000L || heightOffset <= 0.0 || partialTick !in 0f..1f) return null
+        val epsilon = 1e-7
+        val arrivalBand = (floorY - epsilon)..(arrivalY + epsilon)
+        if (previousFeetY !in arrivalBand || feetY !in arrivalBand ||
+            feetY > previousFeetY + epsilon || previousFeetY <= floorY + epsilon) return null
+        val interpolatedFeetY = previousFeetY + (feetY - previousFeetY) * partialTick
+        return (interpolatedFeetY - floorY).coerceIn(0.0, heightOffset)
     }
 }
